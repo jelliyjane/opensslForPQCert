@@ -1318,3 +1318,8 @@ alt_signature_algorithm		1317
 alt_signature_value		1318
 associated_information		1319
 id_ct_rpkiSignedPrefixList		1320
+id_temporaryArc		1321
+id_ce_deltaCertificateDescriptor		1322
+id_at_deltaCertificateRequest		1323
+id_at_deltaCertificateRequestSignature		1324
+id_example		1325

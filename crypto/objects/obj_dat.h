@@ -10,7 +10,7 @@
  */
 
 /* Serialized OID's */
-static const unsigned char so[8487] = {
+static const unsigned char so[8536] = {
     0x2A,0x86,0x48,0x86,0xF7,0x0D,                 /* [    0] OBJ_rsadsi */
     0x2A,0x86,0x48,0x86,0xF7,0x0D,0x01,            /* [    6] OBJ_pkcs */
     0x2A,0x86,0x48,0x86,0xF7,0x0D,0x02,0x02,       /* [   13] OBJ_md2 */
@@ -1183,9 +1183,14 @@ static const unsigned char so[8487] = {
     0x55,0x1D,0x4A,                                /* [ 8469] OBJ_alt_signature_value */
     0x55,0x1D,0x4B,                                /* [ 8472] OBJ_associated_information */
     0x2A,0x86,0x48,0x86,0xF7,0x0D,0x01,0x09,0x10,0x01,0x33,  /* [ 8475] OBJ_id_ct_rpkiSignedPrefixList */
+    0x60,0x86,0x48,0x01,0x86,0xFA,0x6B,0x50,0x06,  /* [ 8486] OBJ_id_temporaryArc */
+    0x60,0x86,0x48,0x01,0x86,0xFA,0x6B,0x50,0x06,0x01,  /* [ 8495] OBJ_id_ce_deltaCertificateDescriptor */
+    0x60,0x86,0x48,0x01,0x86,0xFA,0x6B,0x50,0x06,0x02,  /* [ 8505] OBJ_id_at_deltaCertificateRequest */
+    0x60,0x86,0x48,0x01,0x86,0xFA,0x6B,0x50,0x06,0x03,  /* [ 8515] OBJ_id_at_deltaCertificateRequestSignature */
+    0x60,0x86,0x48,0x01,0x86,0xFA,0x6B,0x50,0x06,0x04,  /* [ 8525] OBJ_id_example */
 };
 
-#define NUM_NID 1321
+#define NUM_NID 1326
 static const ASN1_OBJECT nid_objs[NUM_NID] = {
     {"UNDEF", "undefined", NID_undef},
     {"rsadsi", "RSA Data Security, Inc.", NID_rsadsi, 6, &so[0]},
@@ -2508,9 +2513,14 @@ static const ASN1_OBJECT nid_objs[NUM_NID] = {
     {"altSignatureValue", "X509v3 Alternative Signature Value", NID_alt_signature_value, 3, &so[8469]},
     {"associatedInformation", "X509v3 Associated Information", NID_associated_information, 3, &so[8472]},
     {"id-ct-rpkiSignedPrefixList", "id-ct-rpkiSignedPrefixList", NID_id_ct_rpkiSignedPrefixList, 11, &so[8475]},
+    {"temporaryArc", "Temporary Arc Base", NID_id_temporaryArc, 9, &so[8486]},
+    {"deltaCertificateDescriptor", "X509v3 Delta Certificate Descriptor", NID_id_ce_deltaCertificateDescriptor, 10, &so[8495]},
+    {"deltaCertificateRequest", "X509v3 Delta Certificate Request", NID_id_at_deltaCertificateRequest, 10, &so[8505]},
+    {"deltaCertificateRequestSignature", "X509v3 Delta Certificate Signature", NID_id_at_deltaCertificateRequestSignature, 10, &so[8515]},
+    {"exampleOid", "Example OID", NID_id_example, 10, &so[8525]},
 };
 
-#define NUM_SN 1312
+#define NUM_SN 1317
 static const unsigned int sn_objs[NUM_SN] = {
      364,    /* "AD_DVCS" */
      419,    /* "AES-128-CBC" */
@@ -2944,6 +2954,9 @@ static const unsigned int sn_objs[NUM_SN] = {
      390,    /* "dcobject" */
     1298,    /* "delegatedNameConstraints" */
      140,    /* "deltaCRL" */
+    1322,    /* "deltaCertificateDescriptor" */
+    1323,    /* "deltaCertificateRequest" */
+    1324,    /* "deltaCertificateRequestSignature" */
      891,    /* "deltaRevocationList" */
      107,    /* "description" */
      871,    /* "destinationIndicator" */
@@ -2999,6 +3012,7 @@ static const unsigned int sn_objs[NUM_SN] = {
      389,    /* "enterprises" */
     1267,    /* "ess-attributes" */
     1265,    /* "etsi" */
+    1325,    /* "exampleOid" */
      384,    /* "experimental" */
      172,    /* "extReq" */
       56,    /* "extendedCertificateAttributes" */
@@ -3775,6 +3789,7 @@ static const unsigned int sn_objs[NUM_SN] = {
      864,    /* "telephoneNumber" */
      866,    /* "teletexTerminalIdentifier" */
      865,    /* "telexNumber" */
+    1321,    /* "temporaryArc" */
      459,    /* "textEncodedORAddress" */
      293,    /* "textNotice" */
     1299,    /* "timeSpecification" */
@@ -3826,7 +3841,7 @@ static const unsigned int sn_objs[NUM_SN] = {
     1289,    /* "zstd" */
 };
 
-#define NUM_LN 1312
+#define NUM_LN 1317
 static const unsigned int ln_objs[NUM_LN] = {
      363,    /* "AD Time Stamping" */
      405,    /* "ANSI X9.62" */
@@ -3883,6 +3898,7 @@ static const unsigned int ln_objs[NUM_LN] = {
     1087,    /* "ED25519" */
     1088,    /* "ED448" */
      389,    /* "Enterprises" */
+    1325,    /* "Example OID" */
      384,    /* "Experimental" */
      372,    /* "Extended OCSP Status" */
      172,    /* "Extension Request" */
@@ -4026,6 +4042,7 @@ static const unsigned int ln_objs[NUM_LN] = {
     1020,    /* "TLS Feature" */
      130,    /* "TLS Web Client Authentication" */
      129,    /* "TLS Web Server Authentication" */
+    1321,    /* "Temporary Arc Base" */
      133,    /* "Time Stamping" */
      375,    /* "Trust Root" */
     1283,    /* "Trusted key usage (Oracle)" */
@@ -4055,6 +4072,9 @@ static const unsigned int ln_objs[NUM_LN] = {
       89,    /* "X509v3 Certificate Policies" */
     1298,    /* "X509v3 Delegated Name Constraints" */
      140,    /* "X509v3 Delta CRL Indicator" */
+    1322,    /* "X509v3 Delta Certificate Descriptor" */
+    1323,    /* "X509v3 Delta Certificate Request" */
+    1324,    /* "X509v3 Delta Certificate Signature" */
      126,    /* "X509v3 Extended Key Usage" */
      857,    /* "X509v3 Freshest CRL" */
     1310,    /* "X509v3 Group Attribute Certificate" */
@@ -5142,7 +5162,7 @@ static const unsigned int ln_objs[NUM_LN] = {
      125,    /* "zlib compression" */
 };
 
-#define NUM_OBJ 1178
+#define NUM_OBJ 1183
 static const unsigned int obj_objs[NUM_OBJ] = {
        0,    /* OBJ_undef                        0 */
      181,    /* OBJ_iso                          1 */
@@ -6108,6 +6128,7 @@ static const unsigned int obj_objs[NUM_OBJ] = {
       78,    /* OBJ_netscape_comment             2 16 840 1 113730 1 13 */
       79,    /* OBJ_netscape_cert_sequence       2 16 840 1 113730 2 5 */
      139,    /* OBJ_ns_sgc                       2 16 840 1 113730 4 1 */
+    1321,    /* OBJ_id_temporaryArc              2 16 840 1 114027 80 6 */
      458,    /* OBJ_userId                       0 9 2342 19200300 100 1 1 */
      459,    /* OBJ_textEncodedORAddress         0 9 2342 19200300 100 1 2 */
      460,    /* OBJ_rfc822Mailbox                0 9 2342 19200300 100 1 3 */
@@ -6207,6 +6228,10 @@ static const unsigned int obj_objs[NUM_OBJ] = {
      952,    /* OBJ_ct_precert_poison            1 3 6 1 4 1 11129 2 4 3 */
      953,    /* OBJ_ct_precert_signer            1 3 6 1 4 1 11129 2 4 4 */
      954,    /* OBJ_ct_cert_scts                 1 3 6 1 4 1 11129 2 4 5 */
+    1322,    /* OBJ_id_ce_deltaCertificateDescriptor 2 16 840 1 114027 80 6 1 */
+    1323,    /* OBJ_id_at_deltaCertificateRequest 2 16 840 1 114027 80 6 2 */
+    1324,    /* OBJ_id_at_deltaCertificateRequestSignature 2 16 840 1 114027 80 6 3 */
+    1325,    /* OBJ_id_example                   2 16 840 1 114027 80 6 4 */
      751,    /* OBJ_camellia_128_cbc             1 2 392 200011 61 1 1 1 2 */
      752,    /* OBJ_camellia_192_cbc             1 2 392 200011 61 1 1 1 3 */
      753,    /* OBJ_camellia_256_cbc             1 2 392 200011 61 1 1 1 4 */
