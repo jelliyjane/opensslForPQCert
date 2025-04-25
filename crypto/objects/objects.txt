@@ -1864,3 +1864,21 @@ oracle 746875 1 1 : oracle-jdk-trustedkeyusage : Trusted key usage (Oracle)
 # NID for compression
                             : brotli : Brotli compression
 			    : zstd : Zstandard compression
+
+# delta Certificate
+# Temporary Arc Base OID
+!Cname id-temporaryArc
+2 16 840 1 114027 80 6 : temporaryArc : Temporary Arc Base
+
+# Delta Certificate OIDs
+!Cname id-ce-deltaCertificateDescriptor
+id-temporaryArc 1 : deltaCertificateDescriptor : X509v3 Delta Certificate Descriptor
+
+!Cname id-at-deltaCertificateRequest
+id-temporaryArc 2 : deltaCertificateRequest : X509v3 Delta Certificate Request
+
+!Cname id-at-deltaCertificateRequestSignature
+id-temporaryArc 3 : deltaCertificateRequestSignature : X509v3 Delta Certificate Signature
+
+!Cname id-example
+id-temporaryArc 4 : exampleOid : Example OID

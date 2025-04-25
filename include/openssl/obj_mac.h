@@ -5757,6 +5757,31 @@
 #define LN_zstd         "Zstandard compression"
 #define NID_zstd                1289
 
+#define SN_id_temporaryArc              "temporaryArc"
+#define LN_id_temporaryArc              "Temporary Arc Base"
+#define NID_id_temporaryArc             1321
+#define OBJ_id_temporaryArc             2L,16L,840L,1L,114027L,80L,6L
+
+#define SN_id_ce_deltaCertificateDescriptor             "deltaCertificateDescriptor"
+#define LN_id_ce_deltaCertificateDescriptor             "X509v3 Delta Certificate Descriptor"
+#define NID_id_ce_deltaCertificateDescriptor            1322
+#define OBJ_id_ce_deltaCertificateDescriptor            OBJ_id_temporaryArc,1L
+
+#define SN_id_at_deltaCertificateRequest                "deltaCertificateRequest"
+#define LN_id_at_deltaCertificateRequest                "X509v3 Delta Certificate Request"
+#define NID_id_at_deltaCertificateRequest               1323
+#define OBJ_id_at_deltaCertificateRequest               OBJ_id_temporaryArc,2L
+
+#define SN_id_at_deltaCertificateRequestSignature               "deltaCertificateRequestSignature"
+#define LN_id_at_deltaCertificateRequestSignature               "X509v3 Delta Certificate Signature"
+#define NID_id_at_deltaCertificateRequestSignature              1324
+#define OBJ_id_at_deltaCertificateRequestSignature              OBJ_id_temporaryArc,3L
+
+#define SN_id_example           "exampleOid"
+#define LN_id_example           "Example OID"
+#define NID_id_example          1325
+#define OBJ_id_example          OBJ_id_temporaryArc,4L
+
 #endif /* OPENSSL_OBJ_MAC_H */
 
 #ifndef OPENSSL_NO_DEPRECATED_3_0
