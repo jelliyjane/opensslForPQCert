@@ -18,18 +18,21 @@
 #include <openssl/x509v3.h>
 #include <openssl/pem.h>
 
+#include <openssl/v3_dcd.h>
+
 static int cb(int ok, X509_STORE_CTX *ctx);
 static int check(X509_STORE *ctx, const char *file,
                  STACK_OF(X509) *uchain, STACK_OF(X509) *tchain,
                  STACK_OF(X509_CRL) *crls, int show_chain,
                  STACK_OF(OPENSSL_STRING) *opts);
 static int v_verbose = 0, vflags = 0;
+static int v_dcd_verify = 0;
 
 typedef enum OPTION_choice {
     OPT_COMMON,
     OPT_ENGINE, OPT_CAPATH, OPT_CAFILE, OPT_CASTORE,
     OPT_NOCAPATH, OPT_NOCAFILE, OPT_NOCASTORE,
-    OPT_UNTRUSTED, OPT_TRUSTED, OPT_CRLFILE, OPT_CRL_DOWNLOAD, OPT_SHOW_CHAIN,
+    OPT_UNTRUSTED, OPT_TRUSTED, OPT_CRLFILE, OPT_CRL_DOWNLOAD, OPT_SHOW_CHAIN, OPT_DCD_VERIFY,
     OPT_V_ENUM, OPT_NAMEOPT, OPT_VFYOPT,
     OPT_VERBOSE,
     OPT_PROV_ENUM
@@ -65,6 +68,8 @@ const OPTIONS verify_options[] = {
         "Try downloading CRL information for certificates via their CDP entries"},
     {"show_chain", OPT_SHOW_CHAIN, '-',
         "Display information about the certificate chain"},
+    {"dcd_verify", OPT_DCD_VERIFY, '-',
+        "Enable DeltaCertificateDescriptor verification"},
 
     OPT_V_OPTIONS,
     {"vfyopt", OPT_VFYOPT, 's', "Verification parameter in n:v form"},
@@ -191,6 +196,10 @@ int verify_main(int argc, char **argv)
             if (!opt_provider(o))
                 goto end;
             break;
+        case OPT_DCD_VERIFY:
+            v_dcd_verify = 1;
+            BIO_printf(bio_out, "Delta Certifificate Verify Option\n");
+            break;
         }
     }
 
@@ -291,6 +300,15 @@ static int check(X509_STORE *ctx, const char *file,
     i = X509_verify_cert(csc);
     if (i > 0 && X509_STORE_CTX_get_error(csc) == X509_V_OK) {
         BIO_printf(bio_out, "%s: OK\n", (file == NULL) ? "stdin" : file);
+        if (v_dcd_verify) {
+            if (!verify_dcd_signature(x)) {
+                BIO_printf(bio_err, "DeltaCertificateDescriptor verification failed\n");
+                ret = 0;
+                goto end;
+            } else {
+                BIO_printf(bio_out, "DeltaCertificateDescriptor: OK\n");
+            }
+        }
         ret = 1;
         if (show_chain) {
             int j;

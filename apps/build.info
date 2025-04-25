@@ -57,7 +57,7 @@ ENDIF
 
 IF[{- !$disabled{apps} -}]
   PROGRAMS=openssl
-  SOURCE[openssl]=$INITSRC $OPENSSLSRC
+  SOURCE[openssl]=$INITSRC $OPENSSLSRC ../crypto/x509/v3_delta_cert.c
   INCLUDE[openssl]=.. ../include include
   DEPEND[openssl]=libapps.a ../libssl
 
