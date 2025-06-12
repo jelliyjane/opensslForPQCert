@@ -32,3 +32,6 @@ extern const X509V3_EXT_METHOD ossl_v3_no_rev_avail;
 extern const X509V3_EXT_METHOD ossl_v3_single_use;
 extern const X509V3_EXT_METHOD ossl_v3_indirect_issuer;
 extern const X509V3_EXT_METHOD v3_delta_cert_desc;
+extern const X509V3_EXT_METHOD ossl_v3_alt_pubkey;
+extern const X509V3_EXT_METHOD ossl_v3_alt_sig_alg;
+extern const X509V3_EXT_METHOD ossl_v3_alt_sig_val;

@@ -78,7 +78,10 @@ static const X509V3_EXT_METHOD *standard_exts[] = {
     &ossl_v3_no_assertion,
     &ossl_v3_single_use,
     &ossl_v3_group_ac,
-    &v3_delta_cert_desc
+    &v3_delta_cert_desc,
+    &ossl_v3_alt_pubkey,
+    &ossl_v3_alt_sig_alg,
+    &ossl_v3_alt_sig_val
 };
 
 /* Number of standard extensions */

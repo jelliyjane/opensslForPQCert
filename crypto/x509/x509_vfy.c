@@ -265,6 +265,11 @@ static int verify_chain(X509_STORE_CTX *ctx)
         return ok;
 #endif
 
+    // Verify alternative signatures
+    printf("[verify_chain] start\n");
+    if ((ok = X509v3_alt_sig_validate_path(ctx)) == 0)
+        return ok;
+
     /* If we get this far evaluate policies */
     if ((ctx->param->flags & X509_V_FLAG_POLICY_CHECK) != 0)
         ok = ctx->check_policy(ctx);
