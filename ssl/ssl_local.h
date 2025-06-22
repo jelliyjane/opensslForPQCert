@@ -511,6 +511,7 @@ struct ssl_session_st {
      */
     size_t sid_ctx_length;
     unsigned char sid_ctx[SSL_MAX_SID_CTX_LENGTH];
+       
 # ifndef OPENSSL_NO_PSK
     char *psk_identity_hint;
     char *psk_identity;
@@ -527,6 +528,9 @@ struct ssl_session_st {
     X509 *peer;
     /* Certificate chain peer sent. */
     STACK_OF(X509) *peer_chain;
+    STACK_OF(X509) *peer_pqc_chain;
+    /* Flag to indicate if dual certificates are enabled for this session */
+    int dual_certs_enabled;
     /*
      * when app_verify_callback accepts a session where the peer's
      * certificate is not ok, we must remember the error for session reuse:
@@ -1357,6 +1361,8 @@ struct ssl_connection_st {
 # endif
             /* Signature algorithm we actually use */
             const struct sigalg_lookup_st *sigalg;
+            /* PQC signature algorithm for dual certificate mode */
+            const struct sigalg_lookup_st *pq_sigalg;
             /* Pointer to certificate we use */
             CERT_PKEY *cert;
             /*
@@ -2122,6 +2128,10 @@ typedef struct cert_st {
     /* If not NULL psk identity hint to use for servers */
     char *psk_identity_hint;
 # endif
+    /* Dual certificate support for post-quantum readiness */
+    CERT_PKEY *pqkey;          /* Post-quantum certificate and key */
+    STACK_OF(X509) *pq_chain;  /* Post-quantum certificate chain */
+    int dual_certs_enabled;    /* Flag to enable dual certificate mode */
     CRYPTO_REF_COUNT references;             /* >1 only if SSL_copy_session_id is used */
 } CERT;
 
@@ -3079,3 +3089,5 @@ long ossl_ctrl_internal(SSL *s, int cmd, long larg, void *parg, int no_quic);
      OSSL_QUIC_PERMITTED_OPTIONS_STREAM)
 
 #endif
+
+__owur int ssl_add_cert_chain(SSL_CONNECTION *s, WPACKET *pkt, CERT_PKEY *cpk, int for_comp);

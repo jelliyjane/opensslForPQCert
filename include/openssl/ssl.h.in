@@ -2819,4 +2819,15 @@ __owur int SSL_CTX_get0_server_cert_type(const SSL_CTX *s, unsigned char **t, si
 # ifdef  __cplusplus
 }
 # endif
+
+__owur int SSL_CTX_get0_client_cert_type(const SSL_CTX *ctx, unsigned char **t, size_t *len);
+__owur int SSL_CTX_get0_server_cert_type(const SSL_CTX *s, unsigned char **t, size_t *len);
+
+/* Dual Certificate APIs for Post-Quantum Cryptography */
+__owur int SSL_CTX_enable_dual_certs(SSL_CTX *ctx);
+__owur int SSL_CTX_set_pq_certificate(SSL_CTX *ctx, X509 *cert, EVP_PKEY *key, STACK_OF(X509) *chain);
+
+# ifdef  __cplusplus
+}
+# endif
 #endif

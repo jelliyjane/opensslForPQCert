@@ -373,5 +373,8 @@
 # define SSL_R_WRONG_VERSION_NUMBER                       267
 # define SSL_R_X509_LIB                                   268
 # define SSL_R_X509_VERIFICATION_SETUP_PROBLEMS           269
-
+# define SSL_R_DUAL_CERTS_NOT_ENABLED                     1121
+# define SSL_R_CLASSIC_CHAIN_PROCESSING_FAILED            1122
+# define SSL_R_PQC_CHAIN_PROCESSING_FAILED                1123
+# define SSL_R_INVALID_DUAL_CERT_DELIMITER                1124
 #endif

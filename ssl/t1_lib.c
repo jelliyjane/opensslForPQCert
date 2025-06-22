@@ -3756,10 +3756,12 @@ static const SIGALG_LOOKUP *find_sig_alg(SSL_CONNECTION *s, X509 *x,
 int tls_choose_sigalg(SSL_CONNECTION *s, int fatalerrs)
 {
     const SIGALG_LOOKUP *lu = NULL;
+    const SIGALG_LOOKUP *pq_lu = NULL;
     int sig_idx = -1;
 
     s->s3.tmp.cert = NULL;
     s->s3.tmp.sigalg = NULL;
+    s->s3.tmp.pq_sigalg = NULL;
 
     if (SSL_CONNECTION_IS_TLS13(s)) {
         lu = find_sig_alg(s, NULL, NULL);
@@ -3891,6 +3893,15 @@ int tls_choose_sigalg(SSL_CONNECTION *s, int fatalerrs)
     s->s3.tmp.cert = &s->cert->pkeys[sig_idx];
     s->cert->key = s->s3.tmp.cert;
     s->s3.tmp.sigalg = lu;
+
+    /* Select PQC signature algorithm if dual certificates are enabled */
+    if (s->cert->dual_certs_enabled && s->cert->pqkey != NULL) {
+        /* For now, we'll use the same algorithm as the classic signature */
+        /* In a real implementation, you would select a PQC-specific algorithm here */
+        pq_lu = lu;
+        s->s3.tmp.pq_sigalg = pq_lu;
+    }
+
     return 1;
 }
 
