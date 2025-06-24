@@ -498,7 +498,7 @@ CON_FUNC_RETURN tls_construct_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
         }
 
         /* Handle RSA PSS parameters for PQC signature */
-        if (pq_lu->sig == EVP_PKEY_RSA_PSS && EVP_PKEY_get_id(pq_pkey) == EVP_PKEY_RSA) {
+        if (pq_lu->sig == EVP_PKEY_RSA_PSS) {
             if (EVP_PKEY_CTX_set_rsa_padding(pq_pctx, RSA_PKCS1_PSS_PADDING) <= 0
                 || EVP_PKEY_CTX_set_rsa_pss_saltlen(pq_pctx,
                                                     RSA_PSS_SALTLEN_DIGEST) <= 0) {
@@ -506,8 +506,6 @@ CON_FUNC_RETURN tls_construct_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
                 SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_EVP_LIB);
                 goto err;
             }
-        } else {
-            printf("[DUAL_SIGN_SERVER] PQC signature is not RSA-PSS, skipping RSA-PSS configuration\n");
         }
 
         if (s->version == SSL3_VERSION) {
@@ -864,20 +862,14 @@ MSG_PROCESS_RETURN tls_process_cert_verify(SSL_CONNECTION *s, PACKET *pkt)
         }
 
         /* Configure RSA-PSS parameters for PQC signature verification */
-        if (s->s3.tmp.peer_sigalg->sig == EVP_PKEY_RSA_PSS && EVP_PKEY_get_id(pq_pkey) == EVP_PKEY_RSA) {
+        if (s->s3.tmp.peer_sigalg->sig == EVP_PKEY_RSA_PSS) {
             printf("[DUAL_SIGN_CLIENT] Configuring RSA-PSS parameters for PQC signature\n");
-            if (EVP_PKEY_CTX_set_rsa_padding(pq_pctx, RSA_PKCS1_PSS_PADDING) <= 0) {
-                printf("[DUAL_SIGN_CLIENT] ERROR: Failed to set PQC RSA PSS padding\n");
+            if (EVP_PKEY_CTX_set_rsa_padding(pq_pctx, RSA_PKCS1_PSS_PADDING) <= 0
+                || EVP_PKEY_CTX_set_rsa_pss_saltlen(pq_pctx, RSA_PSS_SALTLEN_DIGEST) <= 0) {
+                printf("[DUAL_SIGN_CLIENT] ERROR: Failed to set RSA-PSS parameters for PQC signature\n");
                 SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_EVP_LIB);
                 goto err;
             }
-            if (EVP_PKEY_CTX_set_rsa_pss_saltlen(pq_pctx, RSA_PSS_SALTLEN_DIGEST) <= 0) {
-                printf("[DUAL_SIGN_CLIENT] ERROR: Failed to set PQC RSA PSS salt length\n");
-                SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_EVP_LIB);
-                goto err;
-            }
-        } else {
-            printf("[DUAL_SIGN_CLIENT] PQC signature is not RSA-PSS, skipping RSA-PSS configuration\n");
         }
 
         if (EVP_DigestVerify(pq_mctx, pq_sig, pq_siglen, hdata, hdatalen) <= 0) {

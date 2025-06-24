@@ -24,8 +24,8 @@ echo "Starting server with dual certificates..."
 ./apps/openssl s_server \
     -cert Test_Dual/server_cert.pem \
     -key Test_Dual/server_key.pem \
-    -pqcert Test_Dual/Certificate_falcon512_server.pem \
-    -pqkey Test_Dual/falcon512_server.key \
+    -pqcert Test_Dual/pqc_cert.pem \
+    -pqkey Test_Dual/pqc_key.pem \
     -enable_dual_certs \
     -accept 4433 \
     -msg \
@@ -85,4 +85,4 @@ echo
 echo "=== Test Complete ==="
 
 # Cleanup
-rm -f server_output.log client_output.log cert_message.log 
+rm -f server_output.log client_output.log cert_message.log

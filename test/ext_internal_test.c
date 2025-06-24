@@ -74,6 +74,7 @@ static EXT_LIST ext_list[] = {
     EXT_ENTRY(certificate_authorities),
     EXT_ENTRY(padding),
     EXT_ENTRY(psk),
+    EXT_ENTRY(dual_signature_algorithms),
     EXT_END(num_builtins)
 };
 
