@@ -27,6 +27,7 @@
 #include "quic/quic_local.h"
 #include <openssl/ct.h>
 
+static int tls1_check_pq_cert_compatibility(SSL_CONNECTION *s, const SIGALG_LOOKUP *lu, const EVP_PKEY *pq_pkey);
 static const SIGALG_LOOKUP *find_sig_alg(SSL_CONNECTION *s, X509 *x, EVP_PKEY *pkey);
 static int tls12_sigalg_allowed(const SSL_CONNECTION *s, int op, const SIGALG_LOOKUP *lu);
 
@@ -3756,10 +3757,12 @@ static const SIGALG_LOOKUP *find_sig_alg(SSL_CONNECTION *s, X509 *x,
 int tls_choose_sigalg(SSL_CONNECTION *s, int fatalerrs)
 {
     const SIGALG_LOOKUP *lu = NULL;
+    const SIGALG_LOOKUP *pq_lu = NULL;
     int sig_idx = -1;
 
     s->s3.tmp.cert = NULL;
     s->s3.tmp.sigalg = NULL;
+    s->s3.tmp.pq_sigalg = NULL;
 
     if (SSL_CONNECTION_IS_TLS13(s)) {
         lu = find_sig_alg(s, NULL, NULL);
@@ -3891,6 +3894,15 @@ int tls_choose_sigalg(SSL_CONNECTION *s, int fatalerrs)
     s->s3.tmp.cert = &s->cert->pkeys[sig_idx];
     s->cert->key = s->s3.tmp.cert;
     s->s3.tmp.sigalg = lu;
+
+    /* Select PQC signature algorithm if dual certificates are enabled */
+    if (s->cert->dual_certs_enabled && s->cert->pqkey != NULL) {
+        /* For now, we'll use the same algorithm as the classic signature */
+        /* In a real implementation, you would select a PQC-specific algorithm here */
+        pq_lu = lu;
+        s->s3.tmp.pq_sigalg = pq_lu;
+    }
+
     return 1;
 }
 
@@ -4055,4 +4067,170 @@ __owur int tls13_set_encoded_pub_key(EVP_PKEY *pkey,
     }
 
     return EVP_PKEY_set1_encoded_public_key(pkey, enckey, enckeylen);
+}
+
+/* Post-quantum signature algorithms - these are placeholder values for now */
+/* In a real implementation, these would be actual PQ signature algorithm codes */
+static const uint16_t tls12_pq_sigalgs[] = {
+    /* Placeholder PQ signature algorithms - replace with actual PQ sigalgs */
+    0x0901, /* PQ_SIGALG_MLDSA_44_SHA256 - placeholder */
+    0x0902, /* PQ_SIGALG_MLDSA_65_SHA256 - placeholder */
+    0x0903, /* PQ_SIGALG_FALCON_512_SHA256 - placeholder */
+    0x0904, /* PQ_SIGALG_FALCON_1024_SHA256 - placeholder */
+    0x0905, /* PQ_SIGALG_DILITHIUM_2_SHA256 - placeholder */
+    0x0906, /* PQ_SIGALG_DILITHIUM_3_SHA256 - placeholder */
+    0x0907, /* PQ_SIGALG_DILITHIUM_5_SHA256 - placeholder */
+    0x0908, /* PQ_SIGALG_SPHINCS_SHA256_128F_SIMPLE - placeholder */
+    0x0909, /* PQ_SIGALG_SPHINCS_SHA256_192F_SIMPLE - placeholder */
+    0x090A, /* PQ_SIGALG_SPHINCS_SHA256_256F_SIMPLE - placeholder */
+};
+
+/* PQ signature algorithm lookup table */
+static const SIGALG_LOOKUP pq_sigalg_lookup_tbl[] = {
+    {"MLDSA-44-SHA256", 0x0901,
+     NID_sha256, SSL_MD_SHA256_IDX, NID_undef, SSL_PKEY_PQ_MLDSA_44,
+     NID_undef, NID_undef, 1},
+    {"MLDSA-65-SHA256", 0x0902,
+     NID_sha256, SSL_MD_SHA256_IDX, NID_undef, SSL_PKEY_PQ_MLDSA_65,
+     NID_undef, NID_undef, 1},
+    {"FALCON-512-SHA256", 0x0903,
+     NID_sha256, SSL_MD_SHA256_IDX, NID_undef, SSL_PKEY_PQ_FALCON_512,
+     NID_undef, NID_undef, 1},
+    {"FALCON-1024-SHA256", 0x0904,
+     NID_sha256, SSL_MD_SHA256_IDX, NID_undef, SSL_PKEY_PQ_FALCON_1024,
+     NID_undef, NID_undef, 1},
+    {"DILITHIUM-2-SHA256", 0x0905,
+     NID_sha256, SSL_MD_SHA256_IDX, NID_undef, SSL_PKEY_PQ_DILITHIUM_2,
+     NID_undef, NID_undef, 1},
+    {"DILITHIUM-3-SHA256", 0x0906,
+     NID_sha256, SSL_MD_SHA256_IDX, NID_undef, SSL_PKEY_PQ_DILITHIUM_3,
+     NID_undef, NID_undef, 1},
+    {"DILITHIUM-5-SHA256", 0x0907,
+     NID_sha256, SSL_MD_SHA256_IDX, NID_undef, SSL_PKEY_PQ_DILITHIUM_5,
+     NID_undef, NID_undef, 1},
+    {"SPHINCS-SHA256-128F-SIMPLE", 0x0908,
+     NID_sha256, SSL_MD_SHA256_IDX, NID_undef, SSL_PKEY_PQ_SPHINCS_128F,
+     NID_undef, NID_undef, 1},
+    {"SPHINCS-SHA256-192F-SIMPLE", 0x0909,
+     NID_sha256, SSL_MD_SHA256_IDX, NID_undef, SSL_PKEY_PQ_SPHINCS_192F,
+     NID_undef, NID_undef, 1},
+    {"SPHINCS-SHA256-256F-SIMPLE", 0x090A,
+     NID_sha256, SSL_MD_SHA256_IDX, NID_undef, SSL_PKEY_PQ_SPHINCS_256F,
+     NID_undef, NID_undef, 1},
+};
+
+/* Get PQ signature algorithms for dual certificate mode */
+size_t tls12_get_pq_sigalgs(SSL_CONNECTION *s, int sent, const uint16_t **psigs)
+{
+    /*
+     * For now, return the default PQ signature algorithms.
+     * In a real implementation, this would check for configured PQ sigalgs
+     * and return those instead.
+     */
+    if (s->cert->dual_conf_sigalgs != NULL) {
+        *psigs = s->cert->dual_conf_sigalgs;
+        return s->cert->dual_conf_sigalgslen;
+    } else {
+        *psigs = tls12_pq_sigalgs;
+        return OSSL_NELEM(tls12_pq_sigalgs);
+    }
+}
+
+/* Lookup PQ signature algorithm */
+static const SIGALG_LOOKUP *tls1_lookup_pq_sigalg(const SSL_CONNECTION *s,
+                                                   uint16_t sigalg)
+{
+    size_t i;
+    const SIGALG_LOOKUP *lu;
+
+    for (i = 0, lu = pq_sigalg_lookup_tbl;
+         i < OSSL_NELEM(pq_sigalg_lookup_tbl);
+         lu++, i++) {
+        if (lu->sigalg == sigalg) {
+            if (!lu->enabled)
+                return NULL;
+            return lu;
+        }
+    }
+    return NULL;
+}
+
+/* Select appropriate PQ signature algorithm based on certificate and preferences */
+static const SIGALG_LOOKUP *tls1_select_pq_sigalg(SSL_CONNECTION *s, 
+                                                   const EVP_PKEY *pq_pkey)
+{
+    const uint16_t *pq_sigs;
+    size_t pq_sigslen, i;
+    const SIGALG_LOOKUP *lu = NULL;
+    
+    /* Get available PQ signature algorithms */
+    pq_sigslen = tls12_get_pq_sigalgs(s, 0, &pq_sigs);
+    
+    /* Look for a PQ sigalg that matches the PQ certificate type */
+    for (i = 0; i < pq_sigslen; i++) {
+        lu = tls1_lookup_pq_sigalg(s, pq_sigs[i]);
+        if (lu == NULL)
+            continue;
+            
+        /* Check if this sigalg is compatible with the PQ certificate */
+        if (tls1_check_pq_cert_compatibility(s, lu, pq_pkey))
+            break;
+    }
+    
+    if (i == pq_sigslen)
+        return NULL;
+        
+    return lu;
+}
+
+/* Check if PQ signature algorithm is compatible with PQ certificate */
+static int tls1_check_pq_cert_compatibility(SSL_CONNECTION *s,
+                                            const SIGALG_LOOKUP *lu,
+                                            const EVP_PKEY *pq_pkey)
+{
+    /* For now, assume all PQ sigalgs are compatible with PQ certificates */
+    /* In a real implementation, this would check the actual certificate type */
+    return 1;
+}
+
+/* Set PQ signature algorithms for dual certificate mode */
+int tls1_set_pq_sigalgs_list(SSL_CTX *ctx, CERT *c, const char *str, int client)
+{
+    sig_cb_st sig;
+    sig.sigalgcnt = 0;
+
+    if (ctx != NULL)
+        sig.ctx = ctx;
+    if (!CONF_parse_list(str, ':', 1, sig_cb, &sig))
+        return 0;
+    if (sig.sigalgcnt == 0) {
+        ERR_raise_data(ERR_LIB_SSL, ERR_R_PASSED_INVALID_ARGUMENT,
+                       "No valid PQ signature algorithms in '%s'", str);
+        return 0;
+    }
+    if (c == NULL)
+        return 1;
+    return tls1_set_raw_pq_sigalgs(c, sig.sigalgs, sig.sigalgcnt, client);
+}
+
+int tls1_set_raw_pq_sigalgs(CERT *c, const uint16_t *psigs, size_t salglen,
+                            int client)
+{
+    uint16_t *sigalgs;
+
+    if ((sigalgs = OPENSSL_malloc(salglen * sizeof(*sigalgs))) == NULL)
+        return 0;
+    memcpy(sigalgs, psigs, salglen * sizeof(*sigalgs));
+
+    if (client) {
+        OPENSSL_free(c->dual_client_sigalgs);
+        c->dual_client_sigalgs = sigalgs;
+        c->dual_client_sigalgslen = salglen;
+    } else {
+        OPENSSL_free(c->dual_conf_sigalgs);
+        c->dual_conf_sigalgs = sigalgs;
+        c->dual_conf_sigalgslen = salglen;
+    }
+
+    return 1;
 }

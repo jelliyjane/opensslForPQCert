@@ -7855,3 +7855,108 @@ int SSL_CTX_get0_server_cert_type(const SSL_CTX *ctx, unsigned char **t, size_t 
     *len = ctx->server_cert_type_len;
     return 1;
 }
+
+/*
+ * Enable dual certificate mode for post-quantum readiness.
+ * This allows the SSL context to use both classic and post-quantum certificates.
+ */
+int SSL_CTX_enable_dual_certs(SSL_CTX *ctx)
+{
+    if (ctx == NULL) {
+        ERR_raise(ERR_LIB_SSL, ERR_R_PASSED_NULL_PARAMETER);
+        return 0;
+    }
+
+    if (ctx->cert == NULL) {
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
+        return 0;
+    }
+
+    /* Enable dual certificate mode */
+    ctx->cert->dual_certs_enabled = 1;
+
+    return 1;
+}
+
+/*
+ * Set the post-quantum certificate, private key, and certificate chain for dual certificate mode.
+ * This function sets the certificate, its associated private key, and the complete certificate chain.
+ */
+int SSL_CTX_set_pq_certificate(SSL_CTX *ctx, X509 *cert, EVP_PKEY *key, STACK_OF(X509) *chain)
+{
+    CERT_PKEY *pqkey;
+    EVP_PKEY *pubkey;
+    size_t i;
+
+    if (ctx == NULL || cert == NULL || key == NULL) {
+        ERR_raise(ERR_LIB_SSL, ERR_R_PASSED_NULL_PARAMETER);
+        return 0;
+    }
+
+    if (ctx->cert == NULL) {
+        ERR_raise(ERR_LIB_SSL, ERR_R_INTERNAL_ERROR);
+        return 0;
+    }
+
+    /* Verify that dual certificate mode is enabled */
+    if (!ctx->cert->dual_certs_enabled) {
+        ERR_raise(ERR_LIB_SSL, SSL_R_DUAL_CERTS_NOT_ENABLED);
+        return 0;
+    }
+
+    /* Get the public key from the certificate */
+    pubkey = X509_get0_pubkey(cert);
+    if (pubkey == NULL) {
+        ERR_raise(ERR_LIB_SSL, SSL_R_X509_LIB);
+        return 0;
+    }
+
+    /* Verify that the private key matches the certificate */
+    if (!X509_check_private_key(cert, key)) {
+        ERR_raise(ERR_LIB_SSL, SSL_R_PRIVATE_KEY_MISMATCH);
+        return 0;
+    }
+
+    /* Check if the key type is supported for post-quantum certificates */
+    if (ssl_cert_lookup_by_pkey(pubkey, &i, ctx) == NULL) {
+        ERR_raise(ERR_LIB_SSL, SSL_R_UNKNOWN_CERTIFICATE_TYPE);
+        return 0;
+    }
+
+    /* Allocate pqkey if not already allocated */
+    if (ctx->cert->pqkey == NULL) {
+        ctx->cert->pqkey = OPENSSL_zalloc(sizeof(CERT_PKEY));
+        if (ctx->cert->pqkey == NULL) {
+            ERR_raise(ERR_LIB_SSL, ERR_R_MALLOC_FAILURE);
+            return 0;
+        }
+    }
+
+    pqkey = ctx->cert->pqkey;
+
+    /* Free any existing certificate and key */
+    X509_free(pqkey->x509);
+    EVP_PKEY_free(pqkey->privatekey);
+
+    /* Set the new certificate and private key */
+    X509_up_ref(cert);
+    pqkey->x509 = cert;
+    EVP_PKEY_up_ref(key);
+    pqkey->privatekey = key;
+
+    /* Set the certificate chain */
+    sk_X509_pop_free(ctx->cert->pq_chain, X509_free);
+    ctx->cert->pq_chain = NULL;
+
+    if (chain != NULL) {
+        ctx->cert->pq_chain = sk_X509_dup(chain);
+        if (ctx->cert->pq_chain == NULL) {
+            ERR_raise(ERR_LIB_SSL, ERR_R_MALLOC_FAILURE);
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+

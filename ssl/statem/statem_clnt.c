@@ -37,6 +37,7 @@ static ossl_inline int cert_req_allowed(SSL_CONNECTION *s);
 static int key_exchange_expected(SSL_CONNECTION *s);
 static int ssl_cipher_list_to_bytes(SSL_CONNECTION *s, STACK_OF(SSL_CIPHER) *sk,
                                     WPACKET *pkt);
+static int do_compressed_cert(SSL_CONNECTION *sc);
 
 static ossl_inline int received_server_cert(SSL_CONNECTION *sc)
 {
@@ -422,13 +423,6 @@ int ossl_statem_client_read_transition(SSL_CONNECTION *s, int mt)
     }
     SSLfatal(s, SSL3_AD_UNEXPECTED_MESSAGE, SSL_R_UNEXPECTED_MESSAGE);
     return 0;
-}
-
-static int do_compressed_cert(SSL_CONNECTION *sc)
-{
-    /* If we negotiated RPK, we won't try to compress it */
-    return sc->ext.client_cert_type == TLSEXT_cert_type_x509
-        && sc->ext.compress_certificate_from_peer[0] != TLSEXT_comp_cert_none;
 }
 
 /*
@@ -1970,6 +1964,13 @@ static WORK_STATE tls_post_process_server_rpk(SSL_CONNECTION *sc,
     return WORK_FINISHED_CONTINUE;
 }
 
+// Ajout : détection du délimiteur dual certificate
+static int detect_dual_cert_delimiter(PACKET *pkt) {
+    if (PACKET_remaining(pkt) < 3) return 0;
+    const unsigned char *peek = PACKET_data(pkt);
+    return (peek[0] == 0x00 && peek[1] == 0x00 && peek[2] == 0x00);
+}
+
 /* prepare server cert verification by setting s->session->peer_chain from pkt */
 MSG_PROCESS_RETURN tls_process_server_certificate(SSL_CONNECTION *s,
                                                   PACKET *pkt)
@@ -1977,20 +1978,17 @@ MSG_PROCESS_RETURN tls_process_server_certificate(SSL_CONNECTION *s,
     unsigned long cert_list_len, cert_len;
     X509 *x = NULL;
     const unsigned char *certstart, *certbytes;
-    size_t chainidx;
+    size_t chainidx = 0;
     unsigned int context = 0;
     SSL_CTX *sctx = SSL_CONNECTION_GET_CTX(s);
+    int dual_mode = 0;
+    STACK_OF(X509) *classic_chain = NULL;
+    STACK_OF(X509) *pqc_chain = NULL;
 
     if (s->ext.server_cert_type == TLSEXT_cert_type_rpk)
         return tls_process_server_rpk(s, pkt);
     if (s->ext.server_cert_type != TLSEXT_cert_type_x509) {
-        SSLfatal(s, SSL_AD_UNSUPPORTED_CERTIFICATE,
-                 SSL_R_UNKNOWN_CERTIFICATE_TYPE);
-        goto err;
-    }
-
-    if ((s->session->peer_chain = sk_X509_new_null()) == NULL) {
-        SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_CRYPTO_LIB);
+        SSLfatal(s, SSL_AD_UNSUPPORTED_CERTIFICATE, SSL_R_UNKNOWN_CERTIFICATE_TYPE);
         goto err;
     }
 
@@ -2002,63 +2000,175 @@ MSG_PROCESS_RETURN tls_process_server_certificate(SSL_CONNECTION *s,
         SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_LENGTH_MISMATCH);
         goto err;
     }
-    for (chainidx = 0; PACKET_remaining(pkt); chainidx++) {
-        if (!PACKET_get_net_3(pkt, &cert_len)
-            || !PACKET_get_bytes(pkt, &certbytes, cert_len)) {
+
+    printf("[DUAL_CERT_CLIENT] Processing certificate message, length: %lu\n", cert_list_len);
+
+    // Préparation des chaînes
+    classic_chain = sk_X509_new_null();
+    pqc_chain = sk_X509_new_null();
+    if (!classic_chain || !pqc_chain) goto err;
+
+    // Parcours de la liste des certificats classiques
+    while (PACKET_remaining(pkt) > 3) {
+        printf("[DUAL_CERT_CLIENT] Processing certificate %zu, remaining: %zu\n", chainidx, PACKET_remaining(pkt));
+        
+        // Vérifier si les 3 prochains octets sont le délimiteur
+        unsigned char peek_bytes[3];
+        if (PACKET_copy_bytes(pkt, peek_bytes, 3)) {
+            if (peek_bytes[0] == 0x00 && peek_bytes[1] == 0x00 && peek_bytes[2] == 0x00) {
+                printf("[DUAL_CERT_CLIENT] Found dual certificate delimiter!\n");
+                dual_mode = 1;
+                PACKET_forward(pkt, 3); // Sauter le délimiteur
+                break;
+            }
+        }
+        
+        // Lire la longueur du certificat
+        if (!PACKET_get_net_3(pkt, &cert_len)) {
             SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_CERT_LENGTH_MISMATCH);
             goto err;
         }
-
+        
+        printf("[DUAL_CERT_CLIENT] Certificate %zu length: %lu\n", chainidx, cert_len);
+        
+        // Lire les données du certificat
+        if (!PACKET_get_bytes(pkt, &certbytes, cert_len)) {
+            SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_CERT_LENGTH_MISMATCH);
+            goto err;
+        }
+        
         certstart = certbytes;
         x = X509_new_ex(sctx->libctx, sctx->propq);
         if (x == NULL) {
             SSLfatal(s, SSL_AD_DECODE_ERROR, ERR_R_ASN1_LIB);
             goto err;
         }
-        if (d2i_X509(&x, (const unsigned char **)&certbytes,
-                     cert_len) == NULL) {
+        
+        if (d2i_X509(&x, &certbytes, cert_len) == NULL) {
             SSLfatal(s, SSL_AD_BAD_CERTIFICATE, ERR_R_ASN1_LIB);
             goto err;
         }
-
+        
         if (certbytes != (certstart + cert_len)) {
             SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_CERT_LENGTH_MISMATCH);
             goto err;
         }
-
-        if (SSL_CONNECTION_IS_TLS13(s)) {
-            RAW_EXTENSION *rawexts = NULL;
-            PACKET extensions;
-
-            if (!PACKET_get_length_prefixed_2(pkt, &extensions)) {
-                SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_BAD_LENGTH);
-                goto err;
-            }
-            if (!tls_collect_extensions(s, &extensions,
-                                        SSL_EXT_TLS1_3_CERTIFICATE, &rawexts,
-                                        NULL, chainidx == 0)
-                || !tls_parse_all_extensions(s, SSL_EXT_TLS1_3_CERTIFICATE,
-                                             rawexts, x, chainidx,
-                                             PACKET_remaining(pkt) == 0)) {
-                OPENSSL_free(rawexts);
-                /* SSLfatal already called */
-                goto err;
-            }
-            OPENSSL_free(rawexts);
-        }
-
-        if (!sk_X509_push(s->session->peer_chain, x)) {
+        
+        if (!sk_X509_push(classic_chain, x)) {
             SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_CRYPTO_LIB);
             goto err;
         }
         x = NULL;
+        
+        // Traiter les extensions TLS 1.3 pour ce certificat
+        if (SSL_CONNECTION_IS_TLS13(s)) {
+            RAW_EXTENSION *rawexts = NULL;
+            PACKET extensions;
+            if (!PACKET_get_length_prefixed_2(pkt, &extensions)) {
+                SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_BAD_LENGTH);
+                goto err;
+            }
+            if (!tls_collect_extensions(s, &extensions, SSL_EXT_TLS1_3_CERTIFICATE, &rawexts, NULL, chainidx == 0)
+                || !tls_parse_all_extensions(s, SSL_EXT_TLS1_3_CERTIFICATE, rawexts, x, chainidx, PACKET_remaining(pkt) == 0)) {
+                OPENSSL_free(rawexts);
+                goto err;
+            }
+            OPENSSL_free(rawexts);
+        }
+        
+        chainidx++;
     }
+
+    printf("[DUAL_CERT_CLIENT] Classic chain processed, certificates: %d\n", sk_X509_num(classic_chain));
+
+    // Si dual_mode, traiter la chaîne PQC
+    if (dual_mode) {
+        printf("[DUAL_CERT_CLIENT] Processing PQC certificate chain\n");
+        chainidx = 0;
+        while (PACKET_remaining(pkt) > 3) {
+            printf("[DUAL_CERT_CLIENT] Processing PQC certificate %zu, remaining: %zu\n", chainidx, PACKET_remaining(pkt));
+            
+            // Lire la longueur du certificat PQC
+            if (!PACKET_get_net_3(pkt, &cert_len)) {
+                SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_CERT_LENGTH_MISMATCH);
+                goto err;
+            }
+            
+            printf("[DUAL_CERT_CLIENT] PQC Certificate %zu length: %lu\n", chainidx, cert_len);
+            
+            // Lire les données du certificat PQC
+            if (!PACKET_get_bytes(pkt, &certbytes, cert_len)) {
+                SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_CERT_LENGTH_MISMATCH);
+                goto err;
+            }
+            
+            certstart = certbytes;
+            x = X509_new_ex(sctx->libctx, sctx->propq);
+            if (x == NULL) {
+                SSLfatal(s, SSL_AD_DECODE_ERROR, ERR_R_ASN1_LIB);
+                goto err;
+            }
+            
+            if (d2i_X509(&x, &certbytes, cert_len) == NULL) {
+                SSLfatal(s, SSL_AD_BAD_CERTIFICATE, ERR_R_ASN1_LIB);
+                goto err;
+            }
+            
+            if (certbytes != (certstart + cert_len)) {
+                SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_CERT_LENGTH_MISMATCH);
+                goto err;
+            }
+            
+            if (!sk_X509_push(pqc_chain, x)) {
+                SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_CRYPTO_LIB);
+                goto err;
+            }
+            x = NULL;
+            
+            // Traiter les extensions TLS 1.3 pour ce certificat PQC
+            if (SSL_CONNECTION_IS_TLS13(s)) {
+                RAW_EXTENSION *rawexts = NULL;
+                PACKET extensions;
+                if (!PACKET_get_length_prefixed_2(pkt, &extensions)) {
+                    SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_BAD_LENGTH);
+                    goto err;
+                }
+                if (!tls_collect_extensions(s, &extensions, SSL_EXT_TLS1_3_CERTIFICATE, &rawexts, NULL, chainidx == 0)
+                    || !tls_parse_all_extensions(s, SSL_EXT_TLS1_3_CERTIFICATE, rawexts, x, chainidx, PACKET_remaining(pkt) == 0)) {
+                    OPENSSL_free(rawexts);
+                    goto err;
+                }
+                OPENSSL_free(rawexts);
+            }
+            
+            chainidx++;
+        }
+        
+        printf("[DUAL_CERT_CLIENT] PQC chain processed, certificates: %d\n", sk_X509_num(pqc_chain));
+    }
+
+    // Stockage des chaînes
+    sk_X509_pop_free(s->session->peer_chain, X509_free);
+    s->session->peer_chain = classic_chain;
+    classic_chain = NULL;
+    
+    if (dual_mode) {
+        // Stocker la chaîne PQC dans la session pour la vérification de signature
+        sk_X509_pop_free(s->session->peer_pqc_chain, X509_free);
+        s->session->peer_pqc_chain = pqc_chain;
+        pqc_chain = NULL;
+        printf("[DUAL_CERT_CLIENT] Dual certificate mode: classic chain and PQC chain stored in session\n");
+    } else {
+        sk_X509_pop_free(pqc_chain, X509_free);
+        printf("[DUAL_CERT_CLIENT] Single certificate mode: only classic chain stored\n");
+    }
+    
     return MSG_PROCESS_CONTINUE_PROCESSING;
 
- err:
+err:
     X509_free(x);
-    OSSL_STACK_OF_X509_free(s->session->peer_chain);
-    s->session->peer_chain = NULL;
+    sk_X509_pop_free(classic_chain, X509_free);
+    sk_X509_pop_free(pqc_chain, X509_free);
     return MSG_PROCESS_ERROR;
 }
 
@@ -4185,4 +4295,11 @@ CON_FUNC_RETURN tls_construct_end_of_early_data(SSL_CONNECTION *s, WPACKET *pkt)
 
     s->early_data_state = SSL_EARLY_DATA_FINISHED_WRITING;
     return CON_FUNC_SUCCESS;
+}
+
+static int do_compressed_cert(SSL_CONNECTION *sc)
+{
+    /* If we negotiated RPK, we won't try to compress it */
+    return sc->ext.client_cert_type == TLSEXT_cert_type_x509
+        && sc->ext.compress_certificate_from_peer[0] != TLSEXT_comp_cert_none;
 }
