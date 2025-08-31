@@ -9,25 +9,47 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include "internal/common.h"
-#include <openssl/bio.h>
-#include <openssl/crypto.h>
-#include <openssl/trace.h>
-#include <openssl/lhash.h>
-#include <openssl/conf.h>
-#include <openssl/x509.h>
-#include <openssl/pem.h>
-#include <openssl/ssl.h>
-#ifndef OPENSSL_NO_ENGINE
-# include <openssl/engine.h>
-#endif
+#include <string.h>
+#include <signal.h>
+#include <openssl/opensslconf.h>
 #include <openssl/err.h>
-/* Needed to get the other O_xxx flags. */
-#ifdef OPENSSL_SYS_VMS
-# include <unixio.h>
-#endif
+#include <openssl/crypto.h>
+#include <openssl/evp.h>
+#include <openssl/x509.h>
+#include <openssl/x509v3.h>
+#include <openssl/pem.h>
+#include <openssl/engine.h>
+#include <openssl/rand.h>
+#include <openssl/ui.h>
+#include <openssl/provider.h>
+#include <openssl/trace.h>
+#include <openssl/core_names.h>
+#include <openssl/asn1.h>
+#include <openssl/asn1t.h>
+#include <openssl/obj_mac.h>
 #include "apps.h"
 #include "progs.h"
+#include "opt.h"
+#include "names.h"
+#include "app_libctx.h"
+#include <openssl/v3_certbind.h>
+
+// --- RelatedCertificate extension support (restored) ---
+// External declaration of the extension method defined in v3_certbind.c
+extern X509V3_EXT_METHOD v3_related_certificate;
+
+// Register the RelatedCertificate extension method defined in v3_certbind.c
+__attribute__((constructor))
+static void register_related_certificate_ext(void) {
+    /* Register the extension display method */
+    /* Use the NID that's already defined in obj_mac.h */
+    v3_related_certificate.ext_nid = NID_id_pe_relatedCert;
+
+    if (!X509V3_EXT_add(&v3_related_certificate)) {
+        fprintf(stderr, "Warning: Failed to register RelatedCertificate extension method\n");
+    }
+}
+// --- End RelatedCertificate extension support ---
 
 /*
  * The LHASH callbacks ("hash" & "cmp") have been replaced by functions with
