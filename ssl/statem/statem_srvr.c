@@ -3865,8 +3865,6 @@ CON_FUNC_RETURN tls_construct_server_certificate(SSL_CONNECTION *s, WPACKET *pkt
     case TLSEXT_cert_type_x509:
         /* Check if dual certificate mode is enabled */
         if (s->cert->dual_certs_enabled && s->cert->pqkey != NULL) {
-            /* Starting dual certificate encoding according to IETF draft */
-            /* Classic cert enabled: %d, PQ cert enabled: %d */
             /* Format according to IETF draft: 
              * Certificate chain format:
              * - Length of classic certificate chain (3 bytes)
@@ -3874,28 +3872,16 @@ CON_FUNC_RETURN tls_construct_server_certificate(SSL_CONNECTION *s, WPACKET *pkt
              * - Length of PQ certificate chain (3 bytes) 
              * - PQ certificate chain
              */
-            /* Encoding classic certificate chain with delimiter */
             if (!ssl3_output_cert_chain_with_delimiter(s, pkt, cpk, 0)) {
-                /* ERROR: Failed to encode classic certificate chain with delimiter */
                 return 0;
             }
-            /* Classic certificate chain with delimiter encoded successfully */
-            /* Encoding PQC certificate chain */
             if (!ssl_add_pqc_cert_chain_ietf_format(s, pkt, s->cert->pqkey, 0)) {
-                /* ERROR: Failed to encode PQC certificate chain */
                 return 0;
             }
-            /* PQC certificate chain encoded successfully */
-            /* Dual certificate encoding completed successfully */
         } else {
-            /* Using standard single certificate mode */
-            /* Dual certs enabled: %d, PQ key available: %d */
-            /* Standard single certificate mode */
             if (!ssl3_output_cert_chain(s, pkt, cpk, 0)) {
-                /* ERROR: Failed to encode single certificate chain */
                 return 0;
             }
-            /* Single certificate chain encoded successfully */
         }
         break;
     default:

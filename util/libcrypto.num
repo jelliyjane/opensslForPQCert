@@ -2458,6 +2458,7 @@ GENERAL_NAME_free                       2510	3_0_0	EXIST::FUNCTION:
 PKCS12_pack_p7encdata                   2511	3_0_0	EXIST::FUNCTION:
 BN_generate_dsa_nonce                   2512	3_0_0	EXIST::FUNCTION:
 X509_verify_cert                        2513	3_0_0	EXIST::FUNCTION:
+X509_verify_dual_certificates           2514	3_0_0	EXIST::FUNCTION:
 X509_policy_level_get0_node             2514	3_0_0	EXIST::FUNCTION:
 X509_REQ_get_attr                       2515	3_0_0	EXIST::FUNCTION:
 SHA1                                    2516	3_0_0	EXIST::FUNCTION:

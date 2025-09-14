@@ -7984,10 +7984,7 @@ int SSL_CTX_get0_server_cert_type(const SSL_CTX *ctx, unsigned char **t, size_t 
     return 1;
 }
 
-/*
- * Enable dual certificate mode for post-quantum readiness.
- * This allows the SSL context to use both classic and post-quantum certificates.
- */
+/* Enable dual certificate mode for post-quantum cryptography */
 int SSL_CTX_enable_dual_certs(SSL_CTX *ctx)
 {
     if (ctx == NULL) {
@@ -8023,10 +8020,7 @@ int SSL_CTX_enable_dual_certs(SSL_CTX *ctx)
     return 1;
 }
 
-/*
- * Set the post-quantum certificate, private key, and certificate chain for dual certificate mode.
- * This function sets the certificate, its associated private key, and the complete certificate chain.
- */
+/* Set post-quantum certificate, private key and chain for dual certificate mode */
 int SSL_CTX_set_pq_certificate(SSL_CTX *ctx, X509 *cert, EVP_PKEY *key, STACK_OF(X509) *chain)
 {
     CERT_PKEY *pqkey;

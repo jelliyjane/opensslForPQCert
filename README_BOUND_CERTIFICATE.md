@@ -86,8 +86,21 @@ cd test_bound_certs
 ### Step 1: Generate CA Infrastructure
 
 ```bash
-cccc
+# Generate classic CA private key (RSA)
+openssl genpkey -algorithm RSA -out ca_rsa_key.pem 
 
+# Generate PQC CA private key ()
+openssl genpkey -algorithm mldsa65 -out ca_mldsa65_key.pem
+
+# Create classic CA certificate    
+openssl-oqs req -new -x509 -key ca_rsa_key.pem \
+-out ca_rsa.pem -days 365 \
+-subj "/C=US/ST=CA/L=San Francisco/O=TestOrg/CN=TestClassicCA"
+
+# Create PQC CA certificate
+openssl-oqs req -new -x509 -key ca_mldsa65_key.pem \
+-out ca_mldsa65_cert.pem -days 365 \
+-subj "/C=US/ST=CA/L=San Francisco/O=TestOrg/CN=TestPQCA"
 ```
 
 ### Step 2: Generate Bound Certificate for server (RSA)
@@ -149,10 +162,15 @@ openssl x509 -in server_mldsa65_bound_cert.pem -text -noout | grep -A 20 "Bound 
 openssl req -in server_mldsa65_bound_req.pem -verify -noout
 ```
 
+### Step 5: Verification avec verify
 
-### Step 5: TLS Handshake Testing
+```bash
+openssl verify -dual -CAfile ca_rsa.pem -pqcafile ca_mldsa65_cert.pem server_rsa_cert.pem server_mldsa65_bound_cert.pem
+```
 
-#### 5.1 Starting the OpenSSL Server
+### Step 6: TLS Handshake Testing
+
+#### 6.1 Starting the OpenSSL Server
 
 ```bash
 # Start the TLS server with the generated certificates
@@ -165,7 +183,7 @@ openssl s_server \
 
 ```
 
-#### 5.2 Connecting the OpenSSL Client
+#### 6.2 Connecting the OpenSSL Client
 
 ```bash
 # In another terminal, connect a TLS client
@@ -173,9 +191,9 @@ openssl s_client -connect localhost:4433 -CAfile ca_cert.pem -pqcafile ca_mldsa6
 ```
 
 
-### Step 6: Results Analysis
+### Step 7: Results Analysis
 
-#### 6.1 Expected TLS Messages
+#### 7.1 Expected TLS Messages
 
 The TLS 1.3 handshake should proceed as follows:
 

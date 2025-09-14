@@ -266,7 +266,7 @@ static int get_cert_verify_tbs_data(SSL_CONNECTION *s, unsigned char *tls13tbs,
     if (SSL_CONNECTION_IS_TLS13(s)) {
         size_t hashlen;
 
-        printf("[GET_CERT_VERIFY_TBS] TLS 1.3 mode, handshake state: %d\n", s->statem.hand_state);
+
         
         /* Set the first 64 bytes of to-be-signed data to octet 32 */
         memset(tls13tbs, 32, TLS13_TBS_START_SIZE);
@@ -288,12 +288,12 @@ static int get_cert_verify_tbs_data(SSL_CONNECTION *s, unsigned char *tls13tbs,
                 || s->statem.hand_state == TLS_ST_SR_CERT_VRFY
                 || s->statem.hand_state == TLS_ST_CR_PQ_CERT_VRFY
                 || s->statem.hand_state == TLS_ST_SR_PQ_CERT_VRFY) {
-            printf("[GET_CERT_VERIFY_TBS] Using saved handshake hash, length: %zu\n", s->cert_verify_hash_len);
+
             memcpy(tls13tbs + TLS13_TBS_PREAMBLE_SIZE, s->cert_verify_hash,
                    s->cert_verify_hash_len);
             hashlen = s->cert_verify_hash_len;
         } else {
-            printf("[GET_CERT_VERIFY_TBS] Computing new handshake hash\n");
+
             if (!ssl_handshake_hash(s, tls13tbs + TLS13_TBS_PREAMBLE_SIZE,
                                        EVP_MAX_MD_SIZE, &hashlen)) {
                 /* SSLfatal() already called */
@@ -303,8 +303,7 @@ static int get_cert_verify_tbs_data(SSL_CONNECTION *s, unsigned char *tls13tbs,
 
         *hdata = tls13tbs;
         *hdatalen = TLS13_TBS_PREAMBLE_SIZE + hashlen;
-        printf("[GET_CERT_VERIFY_TBS] Final data length: %zu (preamble: %d, hash: %zu)\n", 
-               *hdatalen, TLS13_TBS_PREAMBLE_SIZE, hashlen);
+
     } else {
         size_t retlen;
         long retlen_l;
@@ -450,7 +449,7 @@ CON_FUNC_RETURN tls_construct_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
 
 CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
 {
-    printf("[SERVER] Entrée dans tls_construct_pq_cert_verify\n");
+
     EVP_PKEY *pq_pkey = NULL;
     EVP_MD_CTX *pq_mctx = EVP_MD_CTX_new();
     EVP_PKEY_CTX *pq_pctx = NULL;
@@ -463,79 +462,63 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
     CON_FUNC_RETURN ret = CON_FUNC_ERROR;
     SSL_CTX *sctx = SSL_CONNECTION_GET_CTX(s);
 
-    printf("[PQ_CERT_VERIFY_CONSTRUCT] Starting PQ certificate verify construction\n");
-
     if (pq_mctx == NULL) {
-        printf("[PQ_CERT_VERIFY_CONSTRUCT] ERROR: Failed to create MD context\n");
+        printf("[PQ_CERT] Failed to create MD context\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
     }
 
-    /* Vérifier que le mode dual est activé */
+    /* Check if dual mode is enabled */
     if (!s->cert->dual_certs_enabled) {
-        printf("[PQ_CERT_VERIFY_CONSTRUCT] ERROR: Dual certificate mode not enabled\n");
+        printf("[PQ_CERT] Dual certificate mode not enabled\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
     }
 
-    /* Récupérer la clé privée PQC */
+    /* Get PQC private key */
     if (s->cert->pqkey == NULL || s->cert->pqkey->privatekey == NULL) {
-        printf("[PQ_CERT_VERIFY_CONSTRUCT] ERROR: No PQC private key available\n");
+        printf("[PQ_CERT] No PQC private key available\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
     }
     pq_pkey = s->cert->pqkey->privatekey;
 
-    printf("[PQ_CERT_VERIFY_CONSTRUCT] PQC private key type: %d\n", EVP_PKEY_get_id(pq_pkey));
-
-    /* Déterminer l'algorithme de signature PQC basé sur le type de clé */
+    /* Determine PQC signature algorithm based on key type */
     int pq_key_type = EVP_PKEY_get_id(pq_pkey);
     const char *key_type_name = EVP_PKEY_get0_type_name(pq_pkey);
-    printf("[PQ_CERT_VERIFY_CONSTRUCT] PQC key type: %d, name: %s\n", 
-           pq_key_type, key_type_name ? key_type_name : "unknown");
     
     /* Enhanced PQC key type detection for unknown NIDs */
     if (pq_key_type == -1 && key_type_name != NULL) {
-        printf("[PQ_CERT_VERIFY_CONSTRUCT] Using name-based detection for unknown NID\n");
         if (strstr(key_type_name, "falcon512") != NULL) {
             pq_key_type = EVP_PKEY_FALCON512;
-            printf("[PQ_CERT_VERIFY_CONSTRUCT] Detected FALCON-512 by name\n");
         } else if (strstr(key_type_name, "falcon1024") != NULL) {
             pq_key_type = EVP_PKEY_FALCON1024;
-            printf("[PQ_CERT_VERIFY_CONSTRUCT] Detected FALCON-1024 by name\n");
         } else if (strstr(key_type_name, "dilithium2") != NULL) {
             pq_key_type = EVP_PKEY_DILITHIUM2;
-            printf("[PQ_CERT_VERIFY_CONSTRUCT] Detected DILITHIUM-2 by name\n");
         } else if (strstr(key_type_name, "dilithium3") != NULL) {
             pq_key_type = EVP_PKEY_DILITHIUM3;
-            printf("[PQ_CERT_VERIFY_CONSTRUCT] Detected DILITHIUM-3 by name\n");
         } else if (strstr(key_type_name, "dilithium5") != NULL) {
             pq_key_type = EVP_PKEY_DILITHIUM5;
-            printf("[PQ_CERT_VERIFY_CONSTRUCT] Detected DILITHIUM-5 by name\n");
         } else if (strstr(key_type_name, "mldsa") != NULL || strstr(key_type_name, "MLDSA") != NULL) {
             if (strstr(key_type_name, "44") != NULL) {
                 pq_key_type = EVP_PKEY_MLDSA_44;
-                printf("[PQ_CERT_VERIFY_CONSTRUCT] Detected MLDSA-44 by name\n");
             } else if (strstr(key_type_name, "65") != NULL) {
                 pq_key_type = EVP_PKEY_MLDSA_65;
-                printf("[PQ_CERT_VERIFY_CONSTRUCT] Detected MLDSA-65 by name\n");
             } else {
-                pq_key_type = EVP_PKEY_MLDSA_44; // Par défaut MLDSA-44 si non précisé
-                printf("[PQ_CERT_VERIFY_CONSTRUCT] Detected MLDSA by name (default 44)\n");
+                pq_key_type = EVP_PKEY_MLDSA_44; /* Default MLDSA-44 if not specified */
             }
         }
     }
     
-    /* Sélectionner l'algorithme de signature PQC approprié */
+    /* Select appropriate PQC signature algorithm */
     switch (pq_key_type) {
         case EVP_PKEY_FALCON512:
-            printf("[PQ_CERT_VERIFY_CONSTRUCT] Selecting FALCON-512 signature algorithm\n");
-            /* Créer un SIGALG_LOOKUP pour FALCON-512 */
+            /* Create SIGALG_LOOKUP for FALCON-512 */
             static const SIGALG_LOOKUP falcon512_sigalg = {
                 .name = "FALCON-512-SHA256",
                 .sig = EVP_PKEY_FALCON512,
                 .hash = NID_sha256,
-                .sigalg = TLSEXT_SIGALG_falcon512,  /* FALCON-512 */
+                .sigalg = TLSEXT_SIGALG_falcon512,
                 .hash_idx = SSL_MD_SHA256_IDX,
                 .sig_idx = SSL_PKEY_PQ_FALCON_512
             };
@@ -543,8 +526,7 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
             break;
             
         case EVP_PKEY_FALCON1024:
-            printf("[PQ_CERT_VERIFY_CONSTRUCT] Selecting FALCON-1024 signature algorithm\n");
-            /* Créer un SIGALG_LOOKUP pour FALCON-1024 */
+            /* Create SIGALG_LOOKUP for FALCON-1024 */
             static const SIGALG_LOOKUP falcon1024_sigalg = {
                 .name = "FALCON-1024-SHA256",
                 .sig = EVP_PKEY_FALCON1024,
@@ -557,8 +539,7 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
             break;
             
         case EVP_PKEY_DILITHIUM2:
-            printf("[PQ_CERT_VERIFY_CONSTRUCT] Selecting DILITHIUM-2 signature algorithm\n");
-            /* Créer un SIGALG_LOOKUP pour DILITHIUM-2 */
+            /* Create SIGALG_LOOKUP for DILITHIUM-2 */
             static const SIGALG_LOOKUP dilithium2_sigalg = {
                 .name = "DILITHIUM-2-SHA256",
                 .sig = EVP_PKEY_DILITHIUM2,
@@ -571,13 +552,12 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
             break;
             
         case EVP_PKEY_DILITHIUM3:
-            printf("[PQ_CERT_VERIFY_CONSTRUCT] Selecting DILITHIUM-3 signature algorithm\n");
-            /* Créer un SIGALG_LOOKUP pour DILITHIUM-3 */
+            /* Create SIGALG_LOOKUP for DILITHIUM-3 */
             static const SIGALG_LOOKUP dilithium3_sigalg = {
                 .name = "DILITHIUM-3-SHA256",
                 .sig = EVP_PKEY_DILITHIUM3,
                 .hash = NID_sha256,
-                .sigalg = TLSEXT_SIGALG_dilithium3,  /* DILITHIUM-3 */
+                .sigalg = TLSEXT_SIGALG_dilithium3,
                 .hash_idx = SSL_MD_SHA256_IDX,
                 .sig_idx = SSL_PKEY_PQ_DILITHIUM_3
             };
@@ -585,13 +565,12 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
             break;
             
         case EVP_PKEY_DILITHIUM5:
-            printf("[PQ_CERT_VERIFY_CONSTRUCT] Selecting DILITHIUM-5 signature algorithm\n");
-            /* Créer un SIGALG_LOOKUP pour DILITHIUM-5 */
+            /* Create SIGALG_LOOKUP for DILITHIUM-5 */
             static const SIGALG_LOOKUP dilithium5_sigalg = {
                 .name = "DILITHIUM-5-SHA256",
                 .sig = EVP_PKEY_DILITHIUM5,
                 .hash = NID_sha256,
-                .sigalg = TLSEXT_SIGALG_dilithium5,  /* DILITHIUM-5 */
+                .sigalg = TLSEXT_SIGALG_dilithium5,
                 .hash_idx = SSL_MD_SHA256_IDX,
                 .sig_idx = SSL_PKEY_PQ_DILITHIUM_5
             };
@@ -599,7 +578,6 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
             break;
             
         case EVP_PKEY_MLDSA_44:
-            printf("[PQ_CERT_VERIFY_CONSTRUCT] Selecting MLDSA-44 signature algorithm\n");
             static const SIGALG_LOOKUP mldsa44_sigalg = {
                 .name = "MLDSA-44-SHA256",
                 .sig = EVP_PKEY_MLDSA_44,
@@ -611,7 +589,6 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
             pq_sigalg = &mldsa44_sigalg;
             break;
         case EVP_PKEY_MLDSA_65:
-            printf("[PQ_CERT_VERIFY_CONSTRUCT] Selecting MLDSA-65 signature algorithm\n");
             static const SIGALG_LOOKUP mldsa65_sigalg = {
                 .name = "MLDSA-65-SHA256",
                 .sig = EVP_PKEY_MLDSA_65,
@@ -623,94 +600,83 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
             pq_sigalg = &mldsa65_sigalg;
             break;
         default:
-            printf("[PQ_CERT_VERIFY_CONSTRUCT] ERROR: Unsupported PQC key type: %d\n", pq_key_type);
+            printf("[PQ_CERT] Unsupported PQC key type: %d\n", pq_key_type);
             SSLfatal(s, SSL_AD_INSUFFICIENT_SECURITY, SSL_R_NO_SUITABLE_SIGNATURE_ALGORITHM);
         goto end;
     }
-    
-    printf("[PQ_CERT_VERIFY_CONSTRUCT] Selected PQC sigalg: %s (0x%04x)\n", 
-           pq_sigalg ? pq_sigalg->name : "NULL", 
-           pq_sigalg ? pq_sigalg->sigalg : 0);
 
     if (pq_sigalg == NULL) {
-        printf("[PQ_CERT_VERIFY_CONSTRUCT] ERROR: No suitable PQC signature algorithm found\n");
+        printf("[PQ_CERT] No suitable PQC signature algorithm found\n");
         SSLfatal(s, SSL_AD_INSUFFICIENT_SECURITY, SSL_R_NO_SUITABLE_SIGNATURE_ALGORITHM);
         goto end;
     }
 
-    /* Obtenir l'algorithme de hash associé à l'algorithme de signature */
+    /* Get hash algorithm associated with signature algorithm */
     if (!tls1_lookup_md(sctx, pq_sigalg, &pq_md)) {
-        printf("[PQ_CERT_VERIFY_CONSTRUCT] ERROR: Failed to get hash algorithm for sigalg\n");
+        printf("[PQ_CERT] Failed to get hash algorithm for sigalg\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
     }
 
-    printf("[PQ_CERT_VERIFY_CONSTRUCT] Using hash algorithm: %s\n", 
-           pq_md ? EVP_MD_get0_name(pq_md) : "NULL");
-
-    /* Préparer les données à signer */
+    /* Prepare data to sign */
     unsigned char tls13tbs[TLS13_TBS_PREAMBLE_SIZE + EVP_MAX_MD_SIZE];
     if (!get_cert_verify_tbs_data(s, tls13tbs, &hdata, &hdatalen)) {
-        printf("[PQ_CERT_VERIFY_CONSTRUCT] ERROR: Failed to get cert verify TBS data\n");
+        printf("[PQ_CERT] Failed to get cert verify TBS data\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
     }
 
-    /* Écrire l'algorithme de signature PQC */
+    /* Write PQC signature algorithm */
     if (SSL_USE_SIGALGS(s) && !WPACKET_put_bytes_u16(pkt, pq_sigalg->sigalg)) {
-        printf("[PQ_CERT_VERIFY_CONSTRUCT] ERROR: Failed to write PQC signature algorithm\n");
+        printf("[PQ_CERT] Failed to write PQC signature algorithm\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
         goto end;
     }
 
-    /* Créer la signature PQC */
+    /* Create PQC signature */
     if (EVP_DigestSignInit_ex(pq_mctx, &pq_pctx,
                               pq_md == NULL ? NULL : EVP_MD_get0_name(pq_md),
                               sctx->libctx, sctx->propq, pq_pkey,
                               NULL) <= 0) {
-        printf("[PQ_CERT_VERIFY_CONSTRUCT] ERROR: Failed to initialize PQC signature creation\n");
+        printf("[PQ_CERT] Failed to initialize PQC signature creation\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
     }
 
     if (EVP_DigestSignUpdate(pq_mctx, hdata, hdatalen) <= 0) {
-        printf("[PQ_CERT_VERIFY_CONSTRUCT] ERROR: Failed to update PQC signature creation\n");
+        printf("[PQ_CERT] Failed to update PQC signature creation\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
     }
 
-    /* Obtenir la taille de la signature */
+    /* Get signature length */
     if (EVP_DigestSignFinal(pq_mctx, NULL, &pq_siglen) <= 0) {
-        printf("[PQ_CERT_VERIFY_CONSTRUCT] ERROR: Failed to get PQC signature length\n");
+        printf("[PQ_CERT] Failed to get PQC signature length\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
     }
 
-    /* Allouer l'espace pour la signature */
+    /* Allocate signature buffer */
     pq_sig = OPENSSL_malloc(pq_siglen);
     if (pq_sig == NULL) {
-        printf("[PQ_CERT_VERIFY_CONSTRUCT] ERROR: Failed to allocate PQC signature buffer\n");
+        printf("[PQ_CERT] Failed to allocate PQC signature buffer\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
     }
 
-    /* Créer la signature finale */
+    /* Create final signature */
     if (EVP_DigestSignFinal(pq_mctx, pq_sig, &pq_siglen) <= 0) {
-        printf("[PQ_CERT_VERIFY_CONSTRUCT] ERROR: Failed to create PQC signature\n");
+        printf("[PQ_CERT] Failed to create PQC signature\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
     }
 
-    printf("[PQ_CERT_VERIFY_CONSTRUCT] PQC signature created, length: %zu\n", pq_siglen);
-
-    /* Écrire la signature dans le paquet */
+    /* Write signature to packet */
     if (!WPACKET_sub_memcpy_u16(pkt, pq_sig, pq_siglen)) {
-        printf("[PQ_CERT_VERIFY_CONSTRUCT] ERROR: Failed to write PQC signature to packet\n");
+        printf("[PQ_CERT] Failed to write PQC signature to packet\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
     }
-
-    printf("[PQ_CERT_VERIFY_CONSTRUCT] PQC certificate verify message constructed successfully\n");
     ret = CON_FUNC_SUCCESS;
 
 end:
@@ -882,14 +848,14 @@ MSG_PROCESS_RETURN tls_process_cert_verify(SSL_CONNECTION *s, PACKET *pkt)
     
     /* For dual certificates, save the handshake hash after processing classic cert verify */
     if (SSL_CONNECTION_IS_TLS13(s) && s->session && s->session->dual_certs_enabled) {
-        printf("[CLASSIC_CERT_VERIFY] Saving handshake hash for PQ cert verify\n");
+
         if (!ssl_handshake_hash(s, s->cert_verify_hash,
                                 sizeof(s->cert_verify_hash),
                                 &s->cert_verify_hash_len)) {
             SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
             goto err;
         }
-        printf("[CLASSIC_CERT_VERIFY] Handshake hash saved, length: %zu\n", s->cert_verify_hash_len);
+
     }
     
     if (!s->server && SSL_CONNECTION_IS_TLS13(s) && s->s3.tmp.cert_req == 1)
@@ -922,7 +888,7 @@ MSG_PROCESS_RETURN tls_process_pq_certificate_verify(SSL_CONNECTION *s, PACKET *
     PACKET pq_sig_pkt;
     unsigned int sigalg = 0;
 
-    printf("[PQ_CERT_VERIFY_PROCESS] Starting PQ certificate verify processing\n");
+
 
     if (pq_mctx == NULL) {
         printf("[PQ_CERT_VERIFY_PROCESS] ERROR: Failed to create MD context\n");
@@ -930,14 +896,14 @@ MSG_PROCESS_RETURN tls_process_pq_certificate_verify(SSL_CONNECTION *s, PACKET *
         goto end;
     }
 
-    /* Vérifier que le mode dual est activé */
+    /* Check if dual mode is enabled */
     if (!s->session->dual_certs_enabled) {
         printf("[PQ_CERT_VERIFY_PROCESS] ERROR: Dual certificate mode not enabled\n");
         SSLfatal(s, SSL_AD_UNEXPECTED_MESSAGE, SSL_R_UNEXPECTED_MESSAGE);
         goto end;
     }
 
-    /* Récupérer la clé publique PQC depuis la session */
+    /* Get PQC public key from session */
     if (s->session == NULL || s->session->peer_pqc_chain == NULL || 
         sk_X509_num(s->session->peer_pqc_chain) == 0) {
         printf("[PQ_CERT_VERIFY_PROCESS] ERROR: No PQC certificate chain available\n");
@@ -945,7 +911,7 @@ MSG_PROCESS_RETURN tls_process_pq_certificate_verify(SSL_CONNECTION *s, PACKET *
         goto end;
     }
 
-    /* Récupérer le certificat PQC principal */
+    /* Get main PQC certificate */
     X509 *pq_cert = sk_X509_value(s->session->peer_pqc_chain, 0);
     if (pq_cert == NULL) {
         printf("[PQ_CERT_VERIFY_PROCESS] ERROR: No PQC certificate available\n");
@@ -953,7 +919,7 @@ MSG_PROCESS_RETURN tls_process_pq_certificate_verify(SSL_CONNECTION *s, PACKET *
         goto end;
     }
 
-    /* Extraire la clé publique PQC */
+    /* Extract PQC public key */
     pq_pkey = X509_get_pubkey(pq_cert);
     if (pq_pkey == NULL) {
         printf("[PQ_CERT_VERIFY_PROCESS] ERROR: Failed to get PQC public key\n");
@@ -961,7 +927,7 @@ MSG_PROCESS_RETURN tls_process_pq_certificate_verify(SSL_CONNECTION *s, PACKET *
         goto end;
     }
 
-    printf("[PQ_CERT_VERIFY_PROCESS] PQC public key type: %d\n", EVP_PKEY_get_id(pq_pkey));
+
 
     /* Parser l'algorithme de signature PQC */
     if (SSL_USE_SIGALGS(s)) {
@@ -970,58 +936,56 @@ MSG_PROCESS_RETURN tls_process_pq_certificate_verify(SSL_CONNECTION *s, PACKET *
             SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_BAD_PACKET);
             goto end;
         }
-        printf("[PQ_CERT_VERIFY_PROCESS] Received PQC signature algorithm: 0x%04x\n", sigalg);
+
         
-        /* Vérifier l'algorithme de signature */
+        /* Verify signature algorithm */
         if (tls12_check_peer_sigalg(s, sigalg, pq_pkey) <= 0) {
             printf("[PQ_CERT_VERIFY_PROCESS] ERROR: Invalid PQC signature algorithm\n");
             /* SSLfatal() already called */
             goto end;
         }
         
-        /* Déterminer l'algorithme de signature PQC basé sur le type de clé */
+        /* Determine PQC signature algorithm based on key type */
         int pq_key_type = EVP_PKEY_get_id(pq_pkey);
         const char *key_type_name = EVP_PKEY_get0_type_name(pq_pkey);
-        printf("[PQ_CERT_VERIFY_PROCESS] PQC key type: %d, name: %s\n", 
-               pq_key_type, key_type_name ? key_type_name : "unknown");
+
         
         /* Enhanced PQC key type detection for unknown NIDs */
         if (pq_key_type == -1 && key_type_name != NULL) {
-            printf("[PQ_CERT_VERIFY_PROCESS] Using name-based detection for unknown NID\n");
+
             if (strstr(key_type_name, "falcon512") != NULL) {
                 pq_key_type = EVP_PKEY_FALCON512;
-                printf("[PQ_CERT_VERIFY_PROCESS] Detected FALCON-512 by name\n");
+
             } else if (strstr(key_type_name, "falcon1024") != NULL) {
                 pq_key_type = EVP_PKEY_FALCON1024;
-                printf("[PQ_CERT_VERIFY_PROCESS] Detected FALCON-1024 by name\n");
+
             } else if (strstr(key_type_name, "dilithium2") != NULL) {
                 pq_key_type = EVP_PKEY_DILITHIUM2;
-                printf("[PQ_CERT_VERIFY_PROCESS] Detected DILITHIUM-2 by name\n");
+
             } else if (strstr(key_type_name, "dilithium3") != NULL) {
                 pq_key_type = EVP_PKEY_DILITHIUM3;
-                printf("[PQ_CERT_VERIFY_PROCESS] Detected DILITHIUM-3 by name\n");
+
             } else if (strstr(key_type_name, "dilithium5") != NULL) {
                 pq_key_type = EVP_PKEY_DILITHIUM5;
-                printf("[PQ_CERT_VERIFY_PROCESS] Detected DILITHIUM-5 by name\n");
+
             } else if (strstr(key_type_name, "mldsa") != NULL || strstr(key_type_name, "MLDSA") != NULL) {
                 if (strstr(key_type_name, "44") != NULL) {
                     pq_key_type = EVP_PKEY_MLDSA_44;
-                    printf("[PQ_CERT_VERIFY_PROCESS] Detected MLDSA-44 by name\n");
+
                 } else if (strstr(key_type_name, "65") != NULL) {
                     pq_key_type = EVP_PKEY_MLDSA_65;
-                    printf("[PQ_CERT_VERIFY_PROCESS] Detected MLDSA-65 by name\n");
+
                 } else {
-                    pq_key_type = EVP_PKEY_MLDSA_44; // Par défaut MLDSA-44 si non précisé
-                    printf("[PQ_CERT_VERIFY_PROCESS] Detected MLDSA by name (default 44)\n");
+                    pq_key_type = EVP_PKEY_MLDSA_44; /* Default MLDSA-44 if not specified */
+
                 }
             }
         }
         
-        /* Sélectionner l'algorithme de signature PQC approprié */
+        /* Select appropriate PQC signature algorithm */
         switch (pq_key_type) {
             case EVP_PKEY_FALCON512:
-                printf("[PQ_CERT_VERIFY_PROCESS] Selecting FALCON-512 signature algorithm\n");
-                /* Créer un SIGALG_LOOKUP pour FALCON-512 */
+                /* Create SIGALG_LOOKUP for FALCON-512 */
                 static const SIGALG_LOOKUP falcon512_sigalg = {
                     .name = "FALCON-512-SHA256",
                     .sig = EVP_PKEY_FALCON512,
@@ -1034,8 +998,7 @@ MSG_PROCESS_RETURN tls_process_pq_certificate_verify(SSL_CONNECTION *s, PACKET *
                 break;
                 
             case EVP_PKEY_FALCON1024:
-                printf("[PQ_CERT_VERIFY_PROCESS] Selecting FALCON-1024 signature algorithm\n");
-                /* Créer un SIGALG_LOOKUP pour FALCON-1024 */
+                /* Create SIGALG_LOOKUP for FALCON-1024 */
                 static const SIGALG_LOOKUP falcon1024_sigalg = {
                     .name = "FALCON-1024-SHA256",
                     .sig = EVP_PKEY_FALCON1024,
@@ -1048,8 +1011,7 @@ MSG_PROCESS_RETURN tls_process_pq_certificate_verify(SSL_CONNECTION *s, PACKET *
                 break;
                 
             case EVP_PKEY_DILITHIUM2:
-                printf("[PQ_CERT_VERIFY_PROCESS] Selecting DILITHIUM-2 signature algorithm\n");
-                /* Créer un SIGALG_LOOKUP pour DILITHIUM-2 */
+                /* Create SIGALG_LOOKUP for DILITHIUM-2 */
                 static const SIGALG_LOOKUP dilithium2_sigalg = {
                     .name = "DILITHIUM-2-SHA256",
                     .sig = EVP_PKEY_DILITHIUM2,
@@ -1062,8 +1024,7 @@ MSG_PROCESS_RETURN tls_process_pq_certificate_verify(SSL_CONNECTION *s, PACKET *
                 break;
                 
             case EVP_PKEY_DILITHIUM3:
-                printf("[PQ_CERT_VERIFY_PROCESS] Selecting DILITHIUM-3 signature algorithm\n");
-                /* Créer un SIGALG_LOOKUP pour DILITHIUM-3 */
+                /* Create SIGALG_LOOKUP for DILITHIUM-3 */
                 static const SIGALG_LOOKUP dilithium3_sigalg = {
                     .name = "DILITHIUM-3-SHA256",
                     .sig = EVP_PKEY_DILITHIUM3,
@@ -1076,8 +1037,7 @@ MSG_PROCESS_RETURN tls_process_pq_certificate_verify(SSL_CONNECTION *s, PACKET *
                 break;
                 
             case EVP_PKEY_DILITHIUM5:
-                printf("[PQ_CERT_VERIFY_PROCESS] Selecting DILITHIUM-5 signature algorithm\n");
-                /* Créer un SIGALG_LOOKUP pour DILITHIUM-5 */
+                /* Create SIGALG_LOOKUP for DILITHIUM-5 */
                 static const SIGALG_LOOKUP dilithium5_sigalg = {
                     .name = "DILITHIUM-5-SHA256",
                     .sig = EVP_PKEY_DILITHIUM5,
@@ -1090,7 +1050,6 @@ MSG_PROCESS_RETURN tls_process_pq_certificate_verify(SSL_CONNECTION *s, PACKET *
                 break;
                 
             case EVP_PKEY_MLDSA_44:
-                printf("[PQ_CERT_VERIFY_PROCESS] Selecting MLDSA-44 signature algorithm\n");
                 static const SIGALG_LOOKUP mldsa44_sigalg = {
                     .name = "MLDSA-44-SHA256",
                     .sig = EVP_PKEY_MLDSA_44,
@@ -1102,7 +1061,6 @@ MSG_PROCESS_RETURN tls_process_pq_certificate_verify(SSL_CONNECTION *s, PACKET *
                 pq_sigalg_to_use = &mldsa44_sigalg;
                 break;
             case EVP_PKEY_MLDSA_65:
-                printf("[PQ_CERT_VERIFY_PROCESS] Selecting MLDSA-65 signature algorithm\n");
                 static const SIGALG_LOOKUP mldsa65_sigalg = {
                     .name = "MLDSA-65-SHA256",
                     .sig = EVP_PKEY_MLDSA_65,
@@ -1119,12 +1077,10 @@ MSG_PROCESS_RETURN tls_process_pq_certificate_verify(SSL_CONNECTION *s, PACKET *
             goto end;
         }
         
-        printf("[PQ_CERT_VERIFY_PROCESS] Selected PQC sigalg: %s (0x%04x)\n", 
-               pq_sigalg_to_use ? pq_sigalg_to_use->name : "NULL", 
-               pq_sigalg_to_use ? pq_sigalg_to_use->sigalg : 0);
+
     } else {
-        /* Utiliser l'algorithme par défaut basé sur le type de clé */
-        printf("[PQ_CERT_VERIFY_PROCESS] No negotiated sigalg, using default for key type: %d\n", EVP_PKEY_get_id(pq_pkey));
+        /* Use default algorithm based on key type */
+
         /* For now, we'll use a default approach since tls1_get_legacy_sigalg is not accessible */
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
@@ -1136,18 +1092,16 @@ MSG_PROCESS_RETURN tls_process_pq_certificate_verify(SSL_CONNECTION *s, PACKET *
         goto end;
     }
 
-    printf("[PQ_CERT_VERIFY_PROCESS] Using PQC sigalg: %s\n", 
-           pq_sigalg_to_use ? pq_sigalg_to_use->name : "NULL");
 
-    /* Obtenir l'algorithme de hash associé à l'algorithme de signature */
+
+    /* Get hash algorithm associated with signature algorithm */
     if (!tls1_lookup_md(sctx, pq_sigalg_to_use, &pq_md)) {
         printf("[PQ_CERT_VERIFY_PROCESS] ERROR: Failed to get hash algorithm for sigalg\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
     }
 
-    printf("[PQ_CERT_VERIFY_PROCESS] Using hash algorithm: %s\n", 
-           pq_md ? EVP_MD_get0_name(pq_md) : "NULL");
+
 
     /* Parser la signature PQC */
     if (!PACKET_get_length_prefixed_2(pkt, &pq_sig_pkt)) {
@@ -1163,18 +1117,17 @@ MSG_PROCESS_RETURN tls_process_pq_certificate_verify(SSL_CONNECTION *s, PACKET *
         goto end;
     }
 
-    printf("[PQ_CERT_VERIFY_PROCESS] PQC signature length: %zu\n", pq_siglen);
 
-    /* Préparer les données à signer */
-    printf("[PQ_CERT_VERIFY_PROCESS] Current handshake state: %d\n", s->statem.hand_state);
-    printf("[PQ_CERT_VERIFY_PROCESS] Cert verify hash length: %zu\n", s->cert_verify_hash_len);
+
+    /* Prepare data to sign */
+
     if (!get_cert_verify_tbs_data(s, tls13tbs, &hdata, &hdatalen)) {
         printf("[PQ_CERT_VERIFY_PROCESS] ERROR: Failed to get cert verify TBS data\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
     }
 
-    /* Vérifier la signature PQC */
+    /* Verify PQC signature */
     if (EVP_DigestVerifyInit_ex(pq_mctx, &pq_pctx,
                                 pq_md == NULL ? NULL : EVP_MD_get0_name(pq_md),
                                 sctx->libctx, sctx->propq, pq_pkey,
@@ -1184,12 +1137,7 @@ MSG_PROCESS_RETURN tls_process_pq_certificate_verify(SSL_CONNECTION *s, PACKET *
         goto end;
     }
 
-    printf("[PQ_CERT_VERIFY_PROCESS] About to verify signature - siglen: %zu, hdatalen: %zu\n", pq_siglen, hdatalen);
-    printf("[PQ_CERT_VERIFY_PROCESS] First 32 bytes of data to verify: ");
-    for (int i = 0; i < 32 && i < hdatalen; i++) {
-        printf("%02x ", ((unsigned char*)hdata)[i]);
-    }
-    printf("\n");
+
     
     /* For PQ algorithms, use EVP_DigestVerify instead of streaming approach */
     if (EVP_DigestVerify(pq_mctx, (unsigned char *)pq_sig, pq_siglen, hdata, hdatalen) <= 0) {
@@ -1199,7 +1147,7 @@ MSG_PROCESS_RETURN tls_process_pq_certificate_verify(SSL_CONNECTION *s, PACKET *
         goto end;
     }
 
-    printf("[PQ_CERT_VERIFY_PROCESS] PQC signature verification successful\n");
+
     ret = MSG_PROCESS_FINISHED_READING;
 
 end:
@@ -1572,14 +1520,13 @@ static int ssl_add_cert_to_wpacket(SSL_CONNECTION *s, WPACKET *pkt,
     unsigned char *outbytes;
     int context = SSL_EXT_TLS1_3_CERTIFICATE;
 
-    printf("[CLASSIC_CERT_ENCODE] Encoding individual certificate (chain=%d): %s\n", 
-           chain, X509_NAME_oneline(X509_get_subject_name(x), NULL, 0));
+
 
     if (for_comp)
         context |= SSL_EXT_TLS1_3_CERTIFICATE_COMPRESSION;
 
     len = i2d_X509(x, NULL);
-    printf("[CLASSIC_CERT_ENCODE] Certificate DER length: %d bytes\n", len);
+
     if (len < 0) {
         printf("[CLASSIC_CERT_ENCODE] ERROR: Failed to get certificate DER length\n");
         if (!for_comp)
@@ -1593,7 +1540,7 @@ static int ssl_add_cert_to_wpacket(SSL_CONNECTION *s, WPACKET *pkt,
             SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
         return 0;
     }
-    printf("[CLASSIC_CERT_ENCODE] Successfully wrote certificate (%d bytes) to packet\n", len);
+
 
     if ((SSL_CONNECTION_IS_TLS13(s) || for_comp)
             && !tls_construct_extensions(s, pkt, context, x, chain)) {
@@ -1602,7 +1549,7 @@ static int ssl_add_cert_to_wpacket(SSL_CONNECTION *s, WPACKET *pkt,
         return 0;
     }
 
-    printf("[CLASSIC_CERT_ENCODE] Individual certificate encoding completed successfully\n");
+
     return 1;
 }
 
@@ -1652,29 +1599,25 @@ int ssl_add_cert_chain(SSL_CONNECTION *s, WPACKET *pkt, CERT_PKEY *cpk, int for_
     X509_STORE *chain_store;
     SSL_CTX *sctx = SSL_CONNECTION_GET_CTX(s);
 
-    printf("[CLASSIC_CERT_ENCODE] Starting classic certificate chain encoding\n");
+
 
     if (cpk == NULL || cpk->x509 == NULL) {
-        printf("[CLASSIC_CERT_ENCODE] No certificate to encode (cpk=%p, x509=%p)\n", 
-               (void*)cpk, cpk ? (void*)cpk->x509 : NULL);
+
         return 1;
     }
 
     x = cpk->x509;
-    printf("[CLASSIC_CERT_ENCODE] Main certificate found, subject: %s\n", 
-           X509_NAME_oneline(X509_get_subject_name(x), NULL, 0));
+
 
     /*
      * If we have a certificate specific chain use it, else use parent ctx.
      */
     if (cpk->chain != NULL) {
         extra_certs = cpk->chain;
-        printf("[CLASSIC_CERT_ENCODE] Using certificate-specific chain (%d certs)\n", 
-               sk_X509_num(extra_certs));
+
     } else {
         extra_certs = sctx->extra_certs;
-        printf("[CLASSIC_CERT_ENCODE] Using parent context extra certs (%d certs)\n", 
-               extra_certs ? sk_X509_num(extra_certs) : 0);
+
     }
 
     if ((s->mode & SSL_MODE_NO_AUTO_CHAIN) || extra_certs)
@@ -1685,7 +1628,7 @@ int ssl_add_cert_chain(SSL_CONNECTION *s, WPACKET *pkt, CERT_PKEY *cpk, int for_
         chain_store = sctx->cert_store;
 
     if (chain_store != NULL) {
-        printf("[CLASSIC_CERT_ENCODE] Using chain store to build certificate chain\n");
+
         X509_STORE_CTX *xs_ctx = X509_STORE_CTX_new_ex(sctx->libctx,
                                                        sctx->propq);
 
@@ -1725,11 +1668,10 @@ int ssl_add_cert_chain(SSL_CONNECTION *s, WPACKET *pkt, CERT_PKEY *cpk, int for_
             return 0;
         }
         chain_count = sk_X509_num(chain);
-        printf("[CLASSIC_CERT_ENCODE] Built chain with %d certificates from store\n", chain_count);
+
         for (i = 0; i < chain_count; i++) {
             x = sk_X509_value(chain, i);
-            printf("[CLASSIC_CERT_ENCODE] Adding certificate %d/%d to packet: %s\n", 
-                   i+1, chain_count, X509_NAME_oneline(X509_get_subject_name(x), NULL, 0));
+
 
             if (!ssl_add_cert_to_wpacket(s, pkt, x, i, for_comp)) {
                 printf("[CLASSIC_CERT_ENCODE] ERROR: Failed to add certificate %d to packet\n", i);
@@ -1740,7 +1682,7 @@ int ssl_add_cert_chain(SSL_CONNECTION *s, WPACKET *pkt, CERT_PKEY *cpk, int for_
         }
         X509_STORE_CTX_free(xs_ctx);
     } else {
-        printf("[CLASSIC_CERT_ENCODE] No chain store, using extra certs directly\n");
+
         i = ssl_security_cert_chain(s, extra_certs, x, 0);
         if (i != 1) {
             printf("[CLASSIC_CERT_ENCODE] ERROR: Security check failed for certificate chain\n");
@@ -1748,19 +1690,16 @@ int ssl_add_cert_chain(SSL_CONNECTION *s, WPACKET *pkt, CERT_PKEY *cpk, int for_
                 SSLfatal(s, SSL_AD_INTERNAL_ERROR, i);
             return 0;
         }
-        printf("[CLASSIC_CERT_ENCODE] Adding main certificate to packet\n");
+
         if (!ssl_add_cert_to_wpacket(s, pkt, x, 0, for_comp)) {
             printf("[CLASSIC_CERT_ENCODE] ERROR: Failed to add main certificate to packet\n");
             /* SSLfatal() already called */
             return 0;
         }
-        printf("[CLASSIC_CERT_ENCODE] Adding %d extra certificates to packet\n", 
-               sk_X509_num(extra_certs));
+
         for (i = 0; i < sk_X509_num(extra_certs); i++) {
             x = sk_X509_value(extra_certs, i);
-            printf("[CLASSIC_CERT_ENCODE] Adding extra certificate %d/%d: %s\n", 
-                   i+1, sk_X509_num(extra_certs), 
-                   X509_NAME_oneline(X509_get_subject_name(x), NULL, 0));
+
             if (!ssl_add_cert_to_wpacket(s, pkt, x, i + 1, for_comp)) {
                 printf("[CLASSIC_CERT_ENCODE] ERROR: Failed to add extra certificate %d to packet\n", i);
                 /* SSLfatal() already called */
@@ -1768,7 +1707,7 @@ int ssl_add_cert_chain(SSL_CONNECTION *s, WPACKET *pkt, CERT_PKEY *cpk, int for_
             }
         }
     }
-    printf("[CLASSIC_CERT_ENCODE] Classic certificate chain encoding completed successfully\n");
+
     return 1;
 }
 
@@ -3700,7 +3639,7 @@ int ssl_add_pqc_cert_chain_ietf_format(SSL_CONNECTION *s, WPACKET *pkt, CERT_PKE
     int derlen;
     size_t num_certs = 0;
     
-    printf("[PQ_CERT_IETF] Adding PQC certificate chain in IETF format\n");
+
     
     if (cpk == NULL || cpk->x509 == NULL) {
         printf("[PQ_CERT_IETF] ERROR: No PQC certificate available\n");
@@ -3715,7 +3654,7 @@ int ssl_add_pqc_cert_chain_ietf_format(SSL_CONNECTION *s, WPACKET *pkt, CERT_PKE
     }
     num_certs++; /* Include the end-entity certificate */
     
-    printf("[PQ_CERT_IETF] Total PQC certificates in chain: %zu\n", num_certs);
+
     
     /* First, write the length of the entire PQC certificate chain (3 bytes) */
     if (!WPACKET_start_sub_packet_u24(pkt)) {
@@ -3734,7 +3673,7 @@ int ssl_add_pqc_cert_chain_ietf_format(SSL_CONNECTION *s, WPACKET *pkt, CERT_PKE
         return 0;
     }
     
-    printf("[PQ_CERT_IETF] Encoding PQC end-entity certificate (%d bytes)\n", derlen);
+
     
     /* Write certificate length (3 bytes) and data */
     if (!WPACKET_put_bytes_u24(pkt, derlen) ||
@@ -3764,7 +3703,7 @@ int ssl_add_pqc_cert_chain_ietf_format(SSL_CONNECTION *s, WPACKET *pkt, CERT_PKE
                 return 0;
             }
             
-            printf("[PQ_CERT_IETF] Encoding PQC chain certificate %zu (%d bytes)\n", j, derlen);
+
             
             /* Write certificate length (3 bytes) and data */
             if (!WPACKET_put_bytes_u24(pkt, derlen) ||
@@ -3786,45 +3725,37 @@ int ssl_add_pqc_cert_chain_ietf_format(SSL_CONNECTION *s, WPACKET *pkt, CERT_PKE
         return 0;
     }
     
-    printf("[PQ_CERT_IETF] PQC certificate chain encoded successfully in IETF format\n");
+
     return 1;
 }
 
 /* Output certificate chain with delimiter for dual certificate mode */
 int ssl3_output_cert_chain_with_delimiter(SSL_CONNECTION *s, WPACKET *pkt, CERT_PKEY *cpk, int for_comp)
 {
-    printf("[DUAL_CERT_CHAIN] Starting certificate chain encoding with delimiter\n");
-    
     /* Start sub-packet for the entire chain (including delimiter) */
     if (!WPACKET_start_sub_packet_u24(pkt)) {
-        printf("[DUAL_CERT_CHAIN] ERROR: Failed to start sub-packet\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
         return 0;
     }
     
     /* Add the classic certificate chain */
     if (!ssl_add_cert_chain(s, pkt, cpk, for_comp)) {
-        printf("[DUAL_CERT_CHAIN] ERROR: Failed to add classic certificate chain\n");
         /* SSLfatal() already called */
         return 0;
     }
     
     /* Add delimiter: certificate of length 0 */
-    printf("[DUAL_CERT_CHAIN] Adding delimiter (certificate of length 0)\n");
     if (!WPACKET_put_bytes_u24(pkt, 0)) {
-        printf("[DUAL_CERT_CHAIN] ERROR: Failed to write delimiter\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
         return 0;
     }
     
     /* Close the sub-packet */
     if (!WPACKET_close(pkt)) {
-        printf("[DUAL_CERT_CHAIN] ERROR: Failed to close sub-packet\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
         return 0;
     }
     
-    printf("[DUAL_CERT_CHAIN] Certificate chain with delimiter encoded successfully\n");
     return 1;
 }
 

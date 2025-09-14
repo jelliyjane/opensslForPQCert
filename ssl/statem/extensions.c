@@ -2226,9 +2226,9 @@ int get_dual_pq_sigalgs(SSL_CONNECTION *s, const uint16_t **psigs, size_t *psigs
     if (pq_sigslen == 0) {
         /* Fallback to default PQ algorithms */
         static const uint16_t default_pq_sigs[] = {
-            TLSEXT_SIGALG_falcon512, /* FALCON-512 */
-            TLSEXT_SIGALG_dilithium2, /* DILITHIUM-2 */
-            TLSEXT_SIGALG_sphincs_sha256_128f_simple  /* SPHINCS-128F */
+            TLSEXT_SIGALG_falcon512,
+            TLSEXT_SIGALG_dilithium2,
+            TLSEXT_SIGALG_sphincs_sha256_128f_simple
         };
         
         *psigs = default_pq_sigs;
@@ -2258,9 +2258,9 @@ int get_dual_pq_sigalgs(SSL_CONNECTION *s, const uint16_t **psigs, size_t *psigs
         OPENSSL_free(filtered_pq_sigs);
         /* Fallback to default PQ algorithms */
         static const uint16_t default_pq_sigs[] = {
-            TLSEXT_SIGALG_falcon512, /* FALCON-512 */
-            TLSEXT_SIGALG_dilithium2, /* DILITHIUM-2 */
-            TLSEXT_SIGALG_sphincs_sha256_128f_simple  /* SPHINCS-128F */
+            TLSEXT_SIGALG_falcon512,
+            TLSEXT_SIGALG_dilithium2,
+            TLSEXT_SIGALG_sphincs_sha256_128f_simple
         };
         
         *psigs = default_pq_sigs;

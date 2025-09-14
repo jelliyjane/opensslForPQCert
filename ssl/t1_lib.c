@@ -2038,7 +2038,6 @@ int tls12_check_peer_sigalg(SSL_CONNECTION *s, uint16_t sig, EVP_PKEY *pkey)
             return 0;
         }
     } else {
-        printf("[DUAL_SIGN_CLIENT] Skipping cert lookup check for PQ algorithm 0x%04x\n", lu->sigalg);
     }
 
     if (pkeyid == EVP_PKEY_EC) {
@@ -2094,7 +2093,6 @@ int tls12_check_peer_sigalg(SSL_CONNECTION *s, uint16_t sig, EVP_PKEY *pkey)
         size_t pq_sigslen = tls12_get_pq_sigalgs(s, 1, &pq_sigs);
         for (i = 0; i < pq_sigslen; i++, pq_sigs++) {
             if (sig == *pq_sigs) {
-                printf("[DUAL_SIGN_CLIENT] Found signature algorithm in PQ list\n");
                 break;
             }
         }
@@ -2105,7 +2103,6 @@ int tls12_check_peer_sigalg(SSL_CONNECTION *s, uint16_t sig, EVP_PKEY *pkey)
         || s->cert->cert_flags & SSL_CERT_FLAGS_CHECK_TLS_STRICT)
         && !(lu->sigalg >= 0x0401 && lu->sigalg <= 0x040A)  /* Don't allow fallback for PQ 0x04xx */
                     && !(lu->sigalg >= TLSEXT_SIGALG_falcon512 && lu->sigalg <= TLSEXT_SIGALG_mldsa_65)) { /* Don't allow fallback for PQ 0x09xx */
-        printf("[DUAL_SIGN_CLIENT] Signature algorithm not found in sent algorithms\n");
         SSLfatal(s, SSL_AD_HANDSHAKE_FAILURE, SSL_R_WRONG_SIGNATURE_TYPE);
         return 0;
     }
@@ -2125,23 +2122,18 @@ int tls12_check_peer_sigalg(SSL_CONNECTION *s, uint16_t sig, EVP_PKEY *pkey)
     if (lu->sigalg >= 0x0401 && lu->sigalg <= 0x040A) {
         /* For PQ algorithms (0x04xx), use tls1_get_pq_security_bits */
         secbits = tls1_get_pq_security_bits(lu->sigalg);
-        printf("[DUAL_SIGN_CLIENT] Using PQ security level: %d bits\n", secbits);
             } else if (lu->sigalg >= TLSEXT_SIGALG_falcon512 && lu->sigalg <= TLSEXT_SIGALG_mldsa_65) {
         /* For PQ algorithms (0x09xx), use tls1_get_pq_security_bits */
         secbits = tls1_get_pq_security_bits(lu->sigalg);
-        printf("[DUAL_SIGN_CLIENT] Using PQ security level: %d bits\n", secbits);
     } else {
         /* For classical algorithms, use sigalg_security_bits */
         secbits = sigalg_security_bits(SSL_CONNECTION_GET_CTX(s), lu);
-        printf("[DUAL_SIGN_CLIENT] Using classical security level: %d bits\n", secbits);
     }
     
-    printf("[DUAL_SIGN_CLIENT] Security check - secbits: %d, sigalg: 0x%04x\n", secbits, sig);
     if (secbits == 0 ||
         !ssl_security(s, SSL_SECOP_SIGALG_CHECK, secbits,
                       md != NULL ? EVP_MD_get_type(md) : NID_undef,
                       (void *)sigalgstr)) {
-        printf("[DUAL_SIGN_CLIENT] Security check failed for algorithm 0x%04x (secbits: %d)\n", sig, secbits);
         SSLfatal(s, SSL_AD_HANDSHAKE_FAILURE, SSL_R_WRONG_SIGNATURE_TYPE);
         return 0;
     }
@@ -4049,7 +4041,6 @@ int tls_choose_sigalg(SSL_CONNECTION *s, int fatalerrs)
     s->s3.tmp.sigalg = lu;
 
     /* Select classic signature algorithm first */
-    printf("[DUAL_ALGO_SELECT] Selecting classic signature algorithm for dual certificates\n");
     
     /* Use enhanced classic signature algorithm selection */
     const SIGALG_LOOKUP *selected_classic_lu = tls1_select_enhanced_classic_sigalg(s, 
@@ -4058,19 +4049,14 @@ int tls_choose_sigalg(SSL_CONNECTION *s, int fatalerrs)
                                                                                     s->s3.tmp.peer_dual_sigalgslen);
     
     if (selected_classic_lu != NULL) {
-        printf("[DUAL_ALGO_SELECT] Selected classic signature algorithm: %s (0x%04x)\n", 
-               selected_classic_lu->name ? selected_classic_lu->name : "unknown", 
-               selected_classic_lu->sigalg);
         lu = selected_classic_lu;
         s->s3.tmp.sigalg = lu;
     } else {
-        printf("[DUAL_ALGO_SELECT] WARNING: No suitable classic signature algorithm found\n");
         /* Keep the original lu */
     }
 
     /* Select PQC signature algorithm if dual certificates are enabled */
     if (s->cert->dual_certs_enabled && s->cert->pqkey != NULL) {
-        printf("[DUAL_ALGO_SELECT] Selecting PQC signature algorithm for dual certificates\n");
         
         /* Use enhanced PQC signature algorithm selection */
         const SIGALG_LOOKUP *selected_pq_lu = tls1_select_enhanced_pq_sigalg(s, 
@@ -4079,9 +4065,6 @@ int tls_choose_sigalg(SSL_CONNECTION *s, int fatalerrs)
                                                                               s->s3.tmp.peer_dual_pq_sigalgslen);
         
         if (selected_pq_lu != NULL) {
-            printf("[DUAL_ALGO_SELECT] Selected PQC signature algorithm: %s (0x%04x)\n", 
-                   selected_pq_lu->name ? selected_pq_lu->name : "unknown", 
-                   selected_pq_lu->sigalg);
             pq_lu = selected_pq_lu;
             s->s3.tmp.pq_sigalg = pq_lu;
         } else {
@@ -4434,19 +4417,9 @@ static const SIGALG_LOOKUP *tls1_select_enhanced_pq_sigalg(SSL_CONNECTION *s,
     const uint16_t *local_pq_sigs;
     size_t local_pq_sigslen, i, j;
     const SIGALG_LOOKUP *lu = NULL;
-    int pq_key_type;
-    
     /* Get local PQ signature algorithms */
     local_pq_sigslen = tls12_get_pq_sigalgs(s, 0, &local_pq_sigs);
     
-    /* Get PQ key type for compatibility checking */
-    pq_key_type = get_pqc_key_type_enhanced(pq_pkey);
-    
-    printf("[DUAL_ALGO_SELECT] PQ algorithm selection details:\n");
-    printf("[DUAL_ALGO_SELECT]    Local PQ algorithms: %zu\n", local_pq_sigslen);
-    printf("[DUAL_ALGO_SELECT]    Peer PQ algorithms: %zu\n", peer_pq_sigslen);
-    printf("[DUAL_ALGO_SELECT]    PQ key type: %d\n", pq_key_type);
-    printf("[DUAL_ALGO_SELECT]    Role: %s\n", s->server ? "Server" : "Client");
     
     /* Server preference: check local algorithms first, then peer algorithms */
     if (s->server) {
@@ -4460,16 +4433,12 @@ static const SIGALG_LOOKUP *tls1_select_enhanced_pq_sigalg(SSL_CONNECTION *s,
             /* Check if peer supports this algorithm */
             for (j = 0; j < peer_pq_sigslen; j++) {
                 if (local_pq_sigs[i] == peer_pq_sigs[j]) {
-                    
-                    printf("[DUAL_ALGO_SELECT] Selected PQ algorithm: %s (server preference)\n", 
-                           lu->name ? lu->name : "unknown");
                     return lu;
                 }
             }
         }
     } else {
         /* Client preference: check peer algorithms first, then local algorithms */
-        printf("[DUAL_ALGO_SELECT] Client mode: checking peer PQ algorithms first\n");
         for (i = 0; i < peer_pq_sigslen; i++) {
             lu = tls1_lookup_pq_sigalg(s, peer_pq_sigs[i]);
             if (lu == NULL)
@@ -4478,9 +4447,6 @@ static const SIGALG_LOOKUP *tls1_select_enhanced_pq_sigalg(SSL_CONNECTION *s,
             /* Check if we support this algorithm */
             for (j = 0; j < local_pq_sigslen; j++) {
                 if (peer_pq_sigs[i] == local_pq_sigs[j]) {
-                 
-                    printf("[DUAL_ALGO_SELECT] Selected PQ algorithm: %s (client preference)\n", 
-                           lu->name ? lu->name : "unknown");
                     return lu;
                 }
             }
@@ -4495,71 +4461,51 @@ static const SIGALG_LOOKUP *tls1_select_enhanced_pq_sigalg(SSL_CONNECTION *s,
 /* Get security level in bits for PQ signature algorithms */
 int tls1_get_pq_security_bits(uint16_t sigalg)
 {
-    printf("[PQ_SECURITY_T1] Getting security bits for algorithm: 0x%04x\n", sigalg);
     
     /* Get security bits for PQ signature algorithms according to IETF draft */
     switch (sigalg) {
         /* 0x09xx algorithms */
         case TLSEXT_SIGALG_falcon512: /* FALCON-512-SHA256 */
-            printf("[PQ_SECURITY_T1] Algorithm 0x%04x: 128 bits\n", sigalg);
             return 128; /* Level 1 security */
         case TLSEXT_SIGALG_falcon1024: /* FALCON-1024-SHA256 */
-            printf("[PQ_SECURITY_T1] Algorithm 0x%04x: 256 bits\n", sigalg);
             return 256; /* Level 5 security */
         case TLSEXT_SIGALG_dilithium2: /* DILITHIUM-2-SHA256 */
-            printf("[PQ_SECURITY_T1] Algorithm 0x%04x: 128 bits\n", sigalg);
             return 128; /* Level 1 security */
         case TLSEXT_SIGALG_dilithium3: /* DILITHIUM-3-SHA256 */
-            printf("[PQ_SECURITY_T1] Algorithm 0x%04x: 192 bits\n", sigalg);
             return 192; /* Level 3 security */
         case TLSEXT_SIGALG_dilithium5: /* DILITHIUM-5-SHA256 */
-            printf("[PQ_SECURITY_T1] Algorithm 0x%04x: 256 bits\n", sigalg);
             return 256; /* Level 5 security */
         case TLSEXT_SIGALG_sphincs_sha256_128f_simple: /* SPHINCS-SHA256-128F-SIMPLE */
-            printf("[PQ_SECURITY_T1] Algorithm 0x%04x: 128 bits\n", sigalg);
             return 128; /* Level 1 security */
         case TLSEXT_SIGALG_sphincs_sha256_192f_simple: /* SPHINCS-SHA256-192F-SIMPLE */
-            printf("[PQ_SECURITY_T1] Algorithm 0x%04x: 192 bits\n", sigalg);
             return 192; /* Level 3 security */
         case TLSEXT_SIGALG_sphincs_sha256_256f_simple: /* SPHINCS-SHA256-256F-SIMPLE */
-            printf("[PQ_SECURITY_T1] Algorithm 0x%04x: 256 bits\n", sigalg);
             return 256; /* Level 5 security */
         case TLSEXT_SIGALG_mldsa_44: /* MLDSA-44-SHA256 */
-            printf("[PQ_SECURITY_T1] Algorithm 0x%04x: 128 bits\n", sigalg);
             return 128; /* Level 1 security */
         case TLSEXT_SIGALG_mldsa_65: /* MLDSA-65-SHA256 */
-            printf("[PQ_SECURITY_T1] Algorithm 0x%04x: 192 bits\n", sigalg);
             return 192; /* Level 3 security */
         
         /* 0x04xx algorithms (legacy format) */
         case 0x0401: /* FALCON-512 */
-            printf("[PQ_SECURITY_T1] Algorithm 0x%04x: 128 bits\n", sigalg);
             return 128;
         case 0x0402: /* FALCON-1024 */
-            printf("[PQ_SECURITY_T1] Algorithm 0x%04x: 256 bits\n", sigalg);
             return 256;
         case 0x0403: /* DILITHIUM-2 */
-            printf("[PQ_SECURITY_T1] Algorithm 0x%04x: 128 bits\n", sigalg);
             return 128;
         case 0x0404: /* DILITHIUM-3 */
-            printf("[PQ_SECURITY_T1] Algorithm 0x%04x: 192 bits\n", sigalg);
             return 192;
         case 0x0405: /* DILITHIUM-5 */
-            printf("[PQ_SECURITY_T1] Algorithm 0x%04x: 256 bits\n", sigalg);
             return 256;
         case 0x0406: /* SPHINCS-128F */
-            printf("[PQ_SECURITY_T1] Algorithm 0x%04x: 128 bits\n", sigalg);
             return 128;
         case 0x0407: /* SPHINCS-192F */
-            printf("[PQ_SECURITY_T1] Algorithm 0x%04x: 192 bits\n", sigalg);
             return 192;
         case 0x0408: /* SPHINCS-256F */
-            printf("[PQ_SECURITY_T1] Algorithm 0x%04x: 256 bits\n", sigalg);
             return 256;
         
         default:
             /* For unknown algorithms, return a conservative default */
-            printf("[PQ_SECURITY_T1] Unknown algorithm 0x%04x, using default 128 bits\n", sigalg);
             return 128;
     }
 }
@@ -4627,19 +4573,9 @@ static const SIGALG_LOOKUP *tls1_select_enhanced_classic_sigalg(SSL_CONNECTION *
     const uint16_t *local_classic_sigs;
     size_t local_classic_sigslen, i, j;
     const SIGALG_LOOKUP *lu = NULL;
-    int classic_key_type;
-    
     /* Get local classical signature algorithms */
     local_classic_sigslen = tls12_get_psigalgs(s, 0, &local_classic_sigs);
     
-    /* Get classical key type for compatibility checking */
-    classic_key_type = get_key_type_from_evp_pkey(classic_pkey);
-    
-    printf("[DUAL_ALGO_SELECT] Classic algorithm selection details:\n");
-    printf("[DUAL_ALGO_SELECT]    Local classic algorithms: %zu\n", local_classic_sigslen);
-    printf("[DUAL_ALGO_SELECT]    Peer classic algorithms: %zu\n", peer_classic_sigslen);
-    printf("[DUAL_ALGO_SELECT]    Classic key type: %d\n", classic_key_type);
-    printf("[DUAL_ALGO_SELECT]    Role: %s\n", s->server ? "Server" : "Client");
     
     /* Server preference: check local algorithms first, then peer algorithms */
     if (s->server) {
@@ -4652,8 +4588,6 @@ static const SIGALG_LOOKUP *tls1_select_enhanced_classic_sigalg(SSL_CONNECTION *
             for (j = 0; j < peer_classic_sigslen; j++) {
                 if (local_classic_sigs[i] == peer_classic_sigs[j]) {
                     /* Check compatibility with classical certificate */
-                    printf("[DUAL_ALGO_SELECT] Selected classic algorithm: %s (server preference)\n", 
-                           lu->name ? lu->name : "unknown");
                     return lu;
                 }
             }
@@ -4669,8 +4603,6 @@ static const SIGALG_LOOKUP *tls1_select_enhanced_classic_sigalg(SSL_CONNECTION *
             for (j = 0; j < local_classic_sigslen; j++) {
                 if (peer_classic_sigs[i] == local_classic_sigs[j]) {
                     /* Check compatibility with classical certificate */
-                    printf("[DUAL_ALGO_SELECT] Selected classic algorithm: %s (client preference)\n", 
-                           lu->name ? lu->name : "unknown");
                     return lu;
                 }
             }

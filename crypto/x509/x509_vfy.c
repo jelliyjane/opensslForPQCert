@@ -27,6 +27,7 @@
 #include "internal/dane.h"
 #include "crypto/x509.h"
 #include "x509_local.h"
+#include <openssl/v3_certbind.h>
 
 /* CRL score values */
 
@@ -64,6 +65,8 @@ static int check_cert_key_level(X509_STORE_CTX *ctx, X509 *cert);
 static int check_key_level(X509_STORE_CTX *ctx, EVP_PKEY *pkey);
 static int check_sig_level(X509_STORE_CTX *ctx, X509 *cert);
 static int check_curve(X509 *cert);
+static int validate_related_certificate_extension(X509_STORE_CTX *ctx, X509 *x, int depth);
+static int verify_dual_certificates_internal(X509_STORE_CTX *ctx, X509 *cert1, X509 *cert2);
 
 static int get_crl_score(X509_STORE_CTX *ctx, X509 **pissuer,
                          unsigned int *preasons, X509_CRL *crl, X509 *x);
@@ -639,6 +642,20 @@ static int check_extensions(X509_STORE_CTX *ctx)
             } else {
                 CB_FAIL_IF(sk_X509_EXTENSION_num(X509_get0_extensions(x)) > 0,
                            ctx, x, i, X509_V_ERR_EXTENSIONS_REQUIRE_VERSION_3);
+            }
+        }
+
+        /* Validate RelatedCertificate extension if present */
+        if (i == 0 && (ctx->param->flags & X509_V_FLAG_IGNORE_CRITICAL) == 0) {
+            int related_cert_idx = X509_get_ext_by_NID(x, NID_id_pe_relatedCert, -1);
+            if (related_cert_idx >= 0) {
+                X509_EXTENSION *related_cert_ext = X509_get_ext(x, related_cert_idx);
+                if (related_cert_ext != NULL && X509_EXTENSION_get_critical(related_cert_ext)) {
+                    /* RelatedCertificate extension is critical, validate it */
+                    if (!validate_related_certificate_extension(ctx, x, i)) {
+                        CB_FAIL_IF(1, ctx, x, i, X509_V_ERR_RELATED_CERT_VERIFICATION_FAILED);
+                    }
+                }
             }
         }
 
@@ -3678,4 +3695,225 @@ static int check_sig_level(X509_STORE_CTX *ctx, X509 *cert)
         return 0;
 
     return secbits >= minbits_table[level - 1];
+}
+
+static int validate_related_certificate_extension(X509_STORE_CTX *ctx, X509 *x, int depth)
+{
+    X509_EXTENSION *ext;
+    RELATED_CERTIFICATE *rc = NULL;
+    const unsigned char *ext_data;
+    int ext_len;
+    int ret = 0;
+    
+    /* Get the relatedCertificate extension */
+    int ext_idx = X509_get_ext_by_NID(x, NID_id_pe_relatedCert, -1);
+    if (ext_idx < 0) {
+        /* Extension not present, this is valid */
+        return 1;
+    }
+    
+    ext = X509_get_ext(x, ext_idx);
+    if (ext == NULL) {
+        ERR_raise(ERR_LIB_X509V3, X509V3_R_EXTENSION_NOT_FOUND);
+        return -1;
+    }
+    
+    /* Get the extension data */
+    ext_data = X509_EXTENSION_get_data(ext)->data;
+    ext_len = X509_EXTENSION_get_data(ext)->length;
+    
+    /* Decode the extension value */
+    rc = d2i_RELATED_CERTIFICATE(NULL, &ext_data, ext_len);
+    if (rc == NULL) {
+        ERR_raise(ERR_LIB_X509V3, X509V3_R_EXTENSION_NOT_FOUND);
+        return -1;
+    }
+    
+    /* Validate the hash algorithm */
+    if (rc->hashAlgorithm == NULL || rc->hashValue == NULL) {
+        ERR_raise(ERR_LIB_X509V3, X509V3_R_INVALID_EXTENSION_STRING);
+        goto err;
+    }
+    
+    /* Check if the hash algorithm is supported */
+    const EVP_MD *md = EVP_get_digestbyobj(rc->hashAlgorithm->algorithm);
+    if (md == NULL) {
+        ERR_raise(ERR_LIB_X509V3, X509V3_R_UNSUPPORTED_TYPE);
+        goto err;
+    }
+    
+    /* Calculate the hash of the current certificate */
+    unsigned char cert_hash[EVP_MAX_MD_SIZE];
+    unsigned int hash_len;
+    unsigned char *cert_buf = NULL;
+    int cert_len;
+    
+    /* Get the DER encoding of the certificate to hash */
+    cert_len = i2d_X509(x, &cert_buf);
+    if (cert_len <= 0 || cert_buf == NULL) {
+        ERR_raise(ERR_LIB_X509V3, X509V3_R_ERROR_IN_EXTENSION);
+        goto err;
+    }
+    
+    if (!EVP_Digest(cert_buf, cert_len, cert_hash, &hash_len, md, NULL)) {
+        OPENSSL_free(cert_buf);
+        ERR_raise(ERR_LIB_X509V3, X509V3_R_ERROR_IN_EXTENSION);
+        goto err;
+    }
+    
+    OPENSSL_free(cert_buf);
+    
+    /* Compare the calculated hash with the stored hash */
+    if (hash_len != rc->hashValue->length || 
+        memcmp(cert_hash, rc->hashValue->data, hash_len) != 0) {
+        ERR_raise(ERR_LIB_X509V3, X509V3_R_ERROR_IN_EXTENSION);
+        goto err;
+    }
+    
+    /* Extension is valid */
+    ret = 1;
+    
+err:
+    if (rc != NULL)
+        RELATED_CERTIFICATE_free(rc);
+    
+    return ret;
+}
+
+/*-
+ * Verify two certificates and their dual relationship if present.
+ * Both certificates are validated individually, then the RelatedCertificate
+ * extension is checked if it exists in either certificate.
+ */
+static int verify_dual_certificates_internal(X509_STORE_CTX *ctx, X509 *cert1, X509 *cert2)
+{
+    int ret = 0;
+    X509_STORE_CTX *cert1_ctx = NULL;
+    X509_STORE_CTX *cert2_ctx = NULL;
+    
+    if (!cert1 || !cert2) {
+        ERR_raise(ERR_LIB_X509, ERR_R_PASSED_NULL_PARAMETER);
+        return 0;
+    }
+    
+    /* Validate first certificate */
+    cert1_ctx = X509_STORE_CTX_new();
+    if (!cert1_ctx) {
+        ERR_raise(ERR_LIB_X509, ERR_R_MALLOC_FAILURE);
+        goto err;
+    }
+    
+    if (!X509_STORE_CTX_init(cert1_ctx, ctx->store, cert1, ctx->untrusted)) {
+        ERR_raise(ERR_LIB_X509, ERR_R_X509_LIB);
+        goto err;
+    }
+    
+    /* Copy trusted store and parameters */
+    if (ctx->chain)
+        X509_STORE_CTX_set0_trusted_stack(cert1_ctx, ctx->chain);
+    if (ctx->param)
+        X509_STORE_CTX_set0_param(cert1_ctx, ctx->param);
+    
+    if (X509_verify_cert(cert1_ctx) <= 0) {
+        int cert1_error = X509_STORE_CTX_get_error(cert1_ctx);
+        ERR_raise(ERR_LIB_X509, X509_R_CERTIFICATE_VERIFICATION_FAILED);
+        ctx->error = cert1_error;
+        ctx->error_depth = X509_STORE_CTX_get_error_depth(cert1_ctx);
+        goto err;
+    }
+    
+    /* Validate second certificate */
+    cert2_ctx = X509_STORE_CTX_new();
+    if (!cert2_ctx) {
+        ERR_raise(ERR_LIB_X509, ERR_R_MALLOC_FAILURE);
+        goto err;
+    }
+    
+    if (!X509_STORE_CTX_init(cert2_ctx, ctx->store, cert2, ctx->untrusted)) {
+        ERR_raise(ERR_LIB_X509, ERR_R_X509_LIB);
+        goto err;
+    }
+    
+    /* Copy trusted store and parameters */
+    if (ctx->chain)
+        X509_STORE_CTX_set0_trusted_stack(cert2_ctx, ctx->chain);
+    if (ctx->param)
+        X509_STORE_CTX_set0_param(cert2_ctx, ctx->param);
+    
+    if (X509_verify_cert(cert2_ctx) <= 0) {
+        int cert2_error = X509_STORE_CTX_get_error(cert2_ctx);
+        ERR_raise(ERR_LIB_X509, X509_R_CERTIFICATE_VERIFICATION_FAILED);
+        ctx->error = cert2_error;
+        ctx->error_depth = X509_STORE_CTX_get_error_depth(cert2_ctx);
+        goto err;
+    }
+    
+    /* Check RelatedCertificate extension if present */
+    int has_extension = 0;
+    int extension_valid = 1;
+    
+    if (X509_get_ext_by_NID(cert1, NID_id_pe_relatedCert, -1) >= 0) {
+        has_extension = 1;
+        if (verify_related_certificate_extension(cert1, cert2) <= 0) {
+            extension_valid = 0;
+        }
+    }
+    
+    if (X509_get_ext_by_NID(cert2, NID_id_pe_relatedCert, -1) >= 0) {
+        has_extension = 1;
+        if (verify_related_certificate_extension(cert2, cert1) <= 0) {
+            extension_valid = 0;
+        }
+    }
+    
+    if (has_extension && !extension_valid) {
+        ERR_raise(ERR_LIB_X509, X509_R_CERTIFICATE_VERIFICATION_FAILED);
+        ctx->error = X509_V_ERR_RELATED_CERT_VERIFICATION_FAILED;
+        ctx->error_depth = 0;
+        goto err;
+    }
+    
+    ret = 1;
+    
+err:
+    X509_STORE_CTX_free(cert1_ctx);
+    X509_STORE_CTX_free(cert2_ctx);
+    return ret;
+}
+
+/*-
+ * Public function to verify dual certificates.
+ * Creates a new X509_STORE_CTX and calls the internal verification function.
+ */
+int X509_verify_dual_certificates(X509_STORE_CTX *ctx, X509 *cert1, X509 *cert2)
+{
+    X509_STORE_CTX *dual_ctx = NULL;
+    int ret = 0;
+    
+    if (!ctx || !cert1 || !cert2) {
+        ERR_raise(ERR_LIB_X509, ERR_R_PASSED_NULL_PARAMETER);
+        return -1;
+    }
+    
+    dual_ctx = X509_STORE_CTX_new();
+    if (!dual_ctx) {
+        ERR_raise(ERR_LIB_X509, ERR_R_MALLOC_FAILURE);
+        return -1;
+    }
+    
+    if (!X509_STORE_CTX_init(dual_ctx, ctx->store, cert1, ctx->untrusted)) {
+        ERR_raise(ERR_LIB_X509, ERR_R_X509_LIB);
+        goto err;
+    }
+    
+    if (ctx->chain)
+        X509_STORE_CTX_set0_trusted_stack(dual_ctx, ctx->chain);
+    if (ctx->param)
+        X509_STORE_CTX_set0_param(dual_ctx, ctx->param);
+    
+    ret = verify_dual_certificates_internal(dual_ctx, cert1, cert2);
+    
+err:
+    X509_STORE_CTX_free(dual_ctx);
+    return ret;
 }

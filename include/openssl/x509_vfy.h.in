@@ -137,7 +137,20 @@ int (*X509_TRUST_set_default(int (*trust) (int, X509 *, int))) (int, X509 *,
                                                                 int);
 int X509_check_trust(X509 *x, int id, int flags);
 
+/*-
+ * Verify a certificate chain.
+ * Returns 1 on success, 0 on failure, -1 on internal error.
+ */
 int X509_verify_cert(X509_STORE_CTX *ctx);
+
+/*-
+ * Verify dual certificates and their relationship if present.
+ * Both certificates are validated individually, then the RelatedCertificate
+ * extension is verified if it exists in either certificate.
+ * Returns 1 on success, 0 on failure, -1 on internal error.
+ */
+int X509_verify_dual_certificates(X509_STORE_CTX *ctx, X509 *cert1, X509 *cert2);
+
 int X509_STORE_CTX_verify(X509_STORE_CTX *ctx);
 STACK_OF(X509) *X509_build_chain(X509 *target, STACK_OF(X509) *certs,
                                  X509_STORE *store, int with_self_signed,
@@ -315,6 +328,7 @@ X509_LOOKUP_ctrl_ex((x), X509_L_ADD_STORE, (name), 0, NULL,           \
 # define X509_V_ERR_EXTENSIONS_REQUIRE_VERSION_3         93
 # define X509_V_ERR_EC_KEY_EXPLICIT_PARAMS               94
 # define X509_V_ERR_RPK_UNTRUSTED                        95
+# define X509_V_ERR_RELATED_CERT_VERIFICATION_FAILED     96
 
 /* Certificate verify flags */
 # ifndef OPENSSL_NO_DEPRECATED_1_1_0

@@ -2166,20 +2166,15 @@ int tls_parse_ctos_dual_sig_algs(SSL_CONNECTION *s, PACKET *pkt, unsigned int co
     PACKET classical_sig_algs, pq_sig_algs;
     size_t classical_sig_algs_len, pq_sig_algs_len;
     
-    printf("[DUAL_EXT_PARSE] Parsing dual signature algorithms extension\n");
-    printf("[DUAL_EXT_PARSE] Remaining bytes: %zu\n", PACKET_remaining(pkt));
-    printf("[DUAL_EXT_PARSE] Extension type: 0x%04x\n", TLSEXT_TYPE_dual_signature_algorithms);
     
     /* Parse the classical signature algorithms */
     if (!PACKET_get_length_prefixed_2(pkt, &classical_sig_algs)) {
-        printf("[DUAL_EXT_PARSE] ERROR: Failed to parse classical signature algorithms\n");
         SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_BAD_EXTENSION);
         return 0;
     }
     
     /* Parse the post-quantum signature algorithms */
     if (!PACKET_get_length_prefixed_2(pkt, &pq_sig_algs)) {
-        printf("[DUAL_EXT_PARSE] ERROR: Failed to parse post-quantum signature algorithms\n");
         SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_BAD_EXTENSION);
         return 0;
     }
@@ -2231,12 +2226,10 @@ int tls_parse_ctos_dual_sig_algs(SSL_CONNECTION *s, PACKET *pkt, unsigned int co
     
     
     if (PACKET_remaining(pkt) != 0) {
-        printf("[DUAL_EXT_PARSE] ERROR: Extra bytes remaining: %zu\n", PACKET_remaining(pkt));
         SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_BAD_EXTENSION);
         return 0;
     }
     
-    printf("[DUAL_EXT_PARSE] Successfully parsed dual signature algorithms extension\n");
     return 1;
 }
 
@@ -2246,7 +2239,6 @@ EXT_RETURN tls_construct_ctos_dual_sig_algs(SSL_CONNECTION *s, WPACKET *pkt, uns
     const uint16_t *pq_sigalgs = NULL;
     size_t classical_sigalgslen = 0, pq_sigalgslen = 0;
     
-    printf("[DUAL_EXT_CONSTRUCT] Constructing dual signature algorithms extension\n");
     
     /* Get the classical signature algorithms */
     if (!get_dual_classical_sigalgs(s, &classical_sigalgs, &classical_sigalgslen)) {
@@ -2258,8 +2250,6 @@ EXT_RETURN tls_construct_ctos_dual_sig_algs(SSL_CONNECTION *s, WPACKET *pkt, uns
         return EXT_RETURN_NOT_SENT;
     }
     
-    printf("[DUAL_EXT_CONSTRUCT] Classical sig algs count: %zu\n", classical_sigalgslen);
-    printf("[DUAL_EXT_CONSTRUCT] PQ sig algs count: %zu\n", pq_sigalgslen);
     
     /* Don't send if we have no algorithms */
     if (classical_sigalgslen == 0 && pq_sigalgslen == 0) {
@@ -2311,7 +2301,6 @@ EXT_RETURN tls_construct_ctos_dual_sig_algs(SSL_CONNECTION *s, WPACKET *pkt, uns
         return EXT_RETURN_FAIL;
     }
     
-    printf("[DUAL_EXT_CONSTRUCT] Successfully constructed dual signature algorithms extension\n");
     return EXT_RETURN_SENT;
 }
 

@@ -1367,24 +1367,19 @@ int validate_pq_certificate(DUAL_VALIDATION_CTX *ctx)
     if (cert == NULL || pkey == NULL) {
         snprintf(ctx->error_details, sizeof(ctx->error_details),
                 "PQ certificate or private key is NULL");
-        printf("[DUAL_VALIDATION] PQ certificate or private key is NULL\n");
         return 0;
     }
-    
-    printf("[DUAL_VALIDATION] Validating PQ certificate\n");
     
     /* Check certificate validity period */
     if (X509_cmp_current_time(X509_get_notBefore(cert)) > 0) {
         snprintf(ctx->error_details, sizeof(ctx->error_details),
                 "PQ certificate not yet valid");
-        printf("[DUAL_VALIDATION] PQ certificate not yet valid\n");
         return 0;
     }
     
     if (X509_cmp_current_time(X509_get_notAfter(cert)) < 0) {
         snprintf(ctx->error_details, sizeof(ctx->error_details),
                 "PQ certificate has expired");
-        printf("[DUAL_VALIDATION] PQ certificate has expired\n");
         return 0;
     }
     
@@ -1392,7 +1387,6 @@ int validate_pq_certificate(DUAL_VALIDATION_CTX *ctx)
     if (X509_verify(cert, pkey) != 1) {
         snprintf(ctx->error_details, sizeof(ctx->error_details),
                 "PQ certificate signature verification failed");
-        printf("[DUAL_VALIDATION] PQ certificate signature verification failed\n");
         return 0;
     }
     
@@ -1401,11 +1395,8 @@ int validate_pq_certificate(DUAL_VALIDATION_CTX *ctx)
     if (cert_key_type < 1000) { /* Assuming PQ key types start at 1000 */
         snprintf(ctx->error_details, sizeof(ctx->error_details),
                 "Invalid PQ certificate key type: %d", cert_key_type);
-        printf("[DUAL_VALIDATION] Invalid PQ certificate key type: %d\n", cert_key_type);
         return 0;
     }
-    
-    printf("[DUAL_VALIDATION] PQ certificate validation passed\n");
     return 1;
 }
 
@@ -1419,14 +1410,10 @@ int validate_pq_certificate_chain(DUAL_VALIDATION_CTX *ctx)
     STACK_OF(X509) *chain = ctx->pq_chain;
 
     if (chain == NULL) {
-        printf("[DUAL_VALIDATION] PQ certificate chain is NULL\n");
         return 1; /* Not an error if no chain */
     }
 
-    printf("[DUAL_VALIDATION] Validating PQ certificate chain\n");
-
     int num_certs = sk_X509_num(chain);
-    printf("[DUAL_VALIDATION] PQ chain contains %d certificates\n", num_certs);
 
     /* Validate each certificate in the chain */
     for (int i = 0; i < num_certs; i++) {
@@ -1436,19 +1423,15 @@ int validate_pq_certificate_chain(DUAL_VALIDATION_CTX *ctx)
         if (X509_cmp_current_time(X509_get_notBefore(cert)) > 0) {
             snprintf(ctx->error_details, sizeof(ctx->error_details),
                      "PQ chain certificate %d not yet valid", i);
-            printf("[DUAL_VALIDATION] PQ chain certificate %d not yet valid\n", i);
             return 0;
         }
 
         if (X509_cmp_current_time(X509_get_notAfter(cert)) < 0) {
             snprintf(ctx->error_details, sizeof(ctx->error_details),
                      "PQ chain certificate %d has expired", i);
-            printf("[DUAL_VALIDATION] PQ chain certificate %d has expired\n", i);
             return 0;
         }
     }
-
-    printf("[DUAL_VALIDATION] PQ certificate chain validation passed\n");
     return 1;
 }
 
@@ -1847,12 +1830,10 @@ int add_related_certificate_cb(SSL *s, unsigned int ext_type,
         return 1; /* Extension not present - this is acceptable */
     }
     
-    printf("[RELATED_CERT_ADD] Adding RelatedCertificate extension for certificate at index %zu\n", chainidx);
     
     /* Serialize the RelatedCertificate extension */
     int len = i2d_RELATED_CERTIFICATE(rc, NULL);
     if (len <= 0) {
-        printf("[RELATED_CERT_ADD] ERROR: Failed to serialize RelatedCertificate extension\n");
         RELATED_CERTIFICATE_free(rc);
         *al = SSL_AD_INTERNAL_ERROR;
         return 0;
@@ -1860,7 +1841,6 @@ int add_related_certificate_cb(SSL *s, unsigned int ext_type,
     
     unsigned char *ext_data = OPENSSL_malloc(len);
     if (!ext_data) {
-        printf("[RELATED_CERT_ADD] ERROR: Failed to allocate memory for extension data\n");
         RELATED_CERTIFICATE_free(rc);
         *al = SSL_AD_INTERNAL_ERROR;
         return 0;
@@ -1868,7 +1848,6 @@ int add_related_certificate_cb(SSL *s, unsigned int ext_type,
     
     unsigned char *tmp = ext_data;
     if (i2d_RELATED_CERTIFICATE(rc, &tmp) <= 0) {
-        printf("[RELATED_CERT_ADD] ERROR: Failed to encode RelatedCertificate extension\n");
         OPENSSL_free(ext_data);
         RELATED_CERTIFICATE_free(rc);
         *al = SSL_AD_INTERNAL_ERROR;
@@ -1877,8 +1856,6 @@ int add_related_certificate_cb(SSL *s, unsigned int ext_type,
     
     *out = ext_data;
     *outlen = len;
-    
-    printf("[RELATED_CERT_ADD] Successfully added RelatedCertificate extension (%d bytes)\n", len);
     
     RELATED_CERTIFICATE_free(rc);
     return 1; /* Extension added successfully */
@@ -1905,18 +1882,12 @@ int parse_related_certificate_cb(SSL *s, unsigned int ext_type,
     RELATED_CERTIFICATE *rc = get_related_certificate_extension(x);
     if (!rc) {
         /* Extension not present - this is acceptable, continue */
-        printf("[RELATED_CERT_DEBUG] No RelatedCertificate extension found (certificate index %zu) - this is normal\n", chainidx);
         return 1;
     }
-    
-    /* Extension is present - we need to validate it */
-    printf("[RELATED_CERT_DEBUG] Starting RelatedCertificate extension validation\n");
-    printf("[RELATED_CERT_DEBUG] Certificate index: %zu\n", chainidx);
     
     /* Get the peer certificate chain to find the classical certificate */
     STACK_OF(X509) *chain = SSL_get_peer_cert_chain(s);
     if (!chain || sk_X509_num(chain) < 2) {
-        printf("[RELATED_CERT_DEBUG] ERROR: Certificate chain too short for dual validation\n");
         *al = SSL_AD_BAD_CERTIFICATE;
         RELATED_CERTIFICATE_free(rc);
         return 0;
@@ -1924,30 +1895,25 @@ int parse_related_certificate_cb(SSL *s, unsigned int ext_type,
     
     /* Find the classical certificate in the chain */
     /* Assuming classical cert is first (index 0) and PQC cert is second (index 1) */
-    /* Adjust this logic based on your specific chain ordering */
     X509 *classic_cert = NULL;
     X509 *pqc_cert = NULL;
     
     if (chainidx == 0) {
         /* This is the classical certificate - no RelatedCertificate extension expected */
-        printf("[RELATED_CERT_DEBUG] Classical certificate (index 0) - RelatedCertificate extension not expected\n");
         RELATED_CERTIFICATE_free(rc);
         return 1;
     } else if (chainidx == 1) {
         /* This is the PQC certificate - should contain RelatedCertificate extension */
         classic_cert = sk_X509_value(chain, 0);
         pqc_cert = x;
-        printf("[RELATED_CERT_DEBUG] PQC certificate (index 1) - validating RelatedCertificate extension\n");
     } else {
         /* Unexpected certificate position */
-        printf("[RELATED_CERT_DEBUG] ERROR: Unexpected certificate position %zu\n", chainidx);
         *al = SSL_AD_BAD_CERTIFICATE;
         RELATED_CERTIFICATE_free(rc);
         return 0;
     }
     
     if (!classic_cert || !pqc_cert) {
-        printf("[RELATED_CERT_DEBUG] ERROR: Failed to identify classical and PQC certificates\n");
         *al = SSL_AD_BAD_CERTIFICATE;
         RELATED_CERTIFICATE_free(rc);
         return 0;
@@ -1956,19 +1922,15 @@ int parse_related_certificate_cb(SSL *s, unsigned int ext_type,
     /* Get the hash algorithm from the extension */
     const EVP_MD *md = EVP_get_digestbyobj(rc->hashAlgorithm->algorithm);
     if (!md) {
-        printf("[RELATED_CERT_DEBUG] ERROR: Unsupported hash algorithm in RelatedCertificate extension\n");
         *al = SSL_AD_BAD_CERTIFICATE;
         RELATED_CERTIFICATE_free(rc);
         return 0;
     }
     
-    printf("[RELATED_CERT_DEBUG] Hash algorithm: %s\n", EVP_MD_get0_name(md));
-    
     /* Serialize the classical certificate */
     unsigned char *der = NULL;
     int derlen = i2d_X509(classic_cert, &der);
     if (derlen <= 0) {
-        printf("[RELATED_CERT_DEBUG] ERROR: Failed to serialize classical certificate\n");
         *al = SSL_AD_BAD_CERTIFICATE;
         RELATED_CERTIFICATE_free(rc);
         return 0;
@@ -1978,7 +1940,6 @@ int parse_related_certificate_cb(SSL *s, unsigned int ext_type,
     unsigned char hash[EVP_MAX_MD_SIZE];
     unsigned int hashlen = 0;
     if (!EVP_Digest(der, derlen, hash, &hashlen, md, NULL)) {
-        printf("[RELATED_CERT_DEBUG] ERROR: Failed to calculate hash of classical certificate\n");
         OPENSSL_free(der);
         *al = SSL_AD_BAD_CERTIFICATE;
         RELATED_CERTIFICATE_free(rc);
@@ -1989,41 +1950,15 @@ int parse_related_certificate_cb(SSL *s, unsigned int ext_type,
     
     /* Compare the calculated hash with the hash in the extension */
     if (hashlen != (unsigned int)rc->hashValue->length) {
-        printf("[RELATED_CERT_DEBUG] ERROR: Hash length mismatch: calculated=%u, extension=%d\n", 
-               hashlen, rc->hashValue->length);
         *al = SSL_AD_BAD_CERTIFICATE;
         RELATED_CERTIFICATE_free(rc);
         return 0;
     }
     
     if (memcmp(hash, rc->hashValue->data, hashlen) != 0) {
-        printf("[RELATED_CERT_DEBUG] ERROR: Hash value mismatch\n");
-        printf("[RELATED_CERT_DEBUG] Calculated hash: ");
-        for (unsigned int i = 0; i < hashlen; i++) {
-            printf("%02X", hash[i]);
-        }
-        printf("\n");
-        printf("[RELATED_CERT_DEBUG] Extension hash: ");
-        for (int i = 0; i < rc->hashValue->length; i++) {
-            printf("%02X", rc->hashValue->data[i]);
-        }
-        printf("\n");
         *al = SSL_AD_BAD_CERTIFICATE;
         RELATED_CERTIFICATE_free(rc);
         return 0;
-    }
-    
-    printf("[RELATED_CERT_DEBUG] RelatedCertificate extension validation SUCCESS\n");
-    printf("[RELATED_CERT_DEBUG] Hash algorithm: %s\n", EVP_MD_get0_name(md));
-    printf("[RELATED_CERT_DEBUG] Hash length: %u bytes\n", hashlen);
-    printf("[RELATED_CERT_DEBUG] Hash values match perfectly\n");
-    printf("[RELATED_CERT_DEBUG] Classical certificate successfully bound to PQC certificate\n");
-    
-    /* Print URI if present */
-    if (rc->uri && rc->uri->length > 0) {
-        printf("[RELATED_CERT_DEBUG] Related certificate URI: ");
-        fwrite(rc->uri->data, 1, rc->uri->length, stdout);
-        printf("\n");
     }
     
     RELATED_CERTIFICATE_free(rc);

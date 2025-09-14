@@ -17,12 +17,17 @@
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
 #include <openssl/pem.h>
+#include <openssl/v3_certbind.h>
 
 static int cb(int ok, X509_STORE_CTX *ctx);
 static int check(X509_STORE *ctx, const char *file,
                  STACK_OF(X509) *uchain, STACK_OF(X509) *tchain,
                  STACK_OF(X509_CRL) *crls, int show_chain,
                  STACK_OF(OPENSSL_STRING) *opts);
+static int check_dual(X509_STORE *ctx, const char *file1, const char *file2,
+                      STACK_OF(X509) *uchain, STACK_OF(X509) *tchain,
+                      STACK_OF(X509_CRL) *crls, int show_chain,
+                      STACK_OF(OPENSSL_STRING) *opts, const char *classicCAfile, const char *pqCAfile);
 static int v_verbose = 0, vflags = 0;
 
 typedef enum OPTION_choice {
@@ -31,7 +36,7 @@ typedef enum OPTION_choice {
     OPT_NOCAPATH, OPT_NOCAFILE, OPT_NOCASTORE,
     OPT_UNTRUSTED, OPT_TRUSTED, OPT_CRLFILE, OPT_CRL_DOWNLOAD, OPT_SHOW_CHAIN,
     OPT_V_ENUM, OPT_NAMEOPT, OPT_VFYOPT,
-    OPT_VERBOSE,
+    OPT_VERBOSE, OPT_PQCAFILE, OPT_DUAL,
     OPT_PROV_ENUM
 } OPTION_CHOICE;
 
@@ -65,6 +70,8 @@ const OPTIONS verify_options[] = {
         "Try downloading CRL information for certificates via their CDP entries"},
     {"show_chain", OPT_SHOW_CHAIN, '-',
         "Display information about the certificate chain"},
+    {"pqcafile", OPT_PQCAFILE, '<', "PEM format file of PQC CA's"},
+    {"dual", OPT_DUAL, '-', "Verify dual certificates (classic + PQC)"},
 
     OPT_V_OPTIONS,
     {"vfyopt", OPT_VFYOPT, 's', "Verification parameter in n:v form"},
@@ -84,9 +91,9 @@ int verify_main(int argc, char **argv)
     STACK_OF(OPENSSL_STRING) *vfyopts = NULL;
     X509_STORE *store = NULL;
     X509_VERIFY_PARAM *vpm = NULL;
-    const char *prog, *CApath = NULL, *CAfile = NULL, *CAstore = NULL;
+    const char *prog, *CApath = NULL, *CAfile = NULL, *CAstore = NULL, *pqCAfile = NULL;
     int noCApath = 0, noCAfile = 0, noCAstore = 0;
-    int vpmtouched = 0, crl_download = 0, show_chain = 0, i = 0, ret = 1;
+    int vpmtouched = 0, crl_download = 0, show_chain = 0, dual_mode = 0, i = 0, ret = 1;
     OPTION_CHOICE o;
 
     if ((vpm = X509_VERIFY_PARAM_new()) == NULL)
@@ -187,6 +194,12 @@ int verify_main(int argc, char **argv)
         case OPT_VERBOSE:
             v_verbose = 1;
             break;
+        case OPT_PQCAFILE:
+            pqCAfile = opt_arg();
+            break;
+        case OPT_DUAL:
+            dual_mode = 1;
+            break;
         case OPT_PROV_CASES:
             if (!opt_provider(o))
                 goto end;
@@ -220,15 +233,38 @@ int verify_main(int argc, char **argv)
         store_setup_crl_download(store);
 
     ret = 0;
-    if (argc < 1) {
-        if (check(store, NULL, untrusted, trusted, crls, show_chain,
-                  vfyopts) != 1)
+    if (dual_mode) {
+        /* Dual certificate verification mode */
+        if (argc < 2) {
+            BIO_printf(bio_err, "%s: -dual requires at least two certificates\n", prog);
+            goto end;
+        }
+        
+        if (argc > 2) {
+            BIO_printf(bio_err, "%s: -dual supports exactly two certificates\n", prog);
+            goto end;
+        }
+        
+        /* Simple case: 2 certificates */
+        const char *cert1 = argv[0];
+        const char *cert2 = argv[1];
+        
+        /* Verify dual certificates */
+        if (check_dual(store, cert1, cert2, untrusted, trusted, crls, 
+                      show_chain, vfyopts, CAfile, pqCAfile) != 1)
             ret = -1;
     } else {
-        for (i = 0; i < argc; i++)
-            if (check(store, argv[i], untrusted, trusted, crls, show_chain,
+        /* Standard single certificate verification */
+        if (argc < 1) {
+            if (check(store, NULL, untrusted, trusted, crls, show_chain,
                       vfyopts) != 1)
                 ret = -1;
+        } else {
+            for (i = 0; i < argc; i++)
+                if (check(store, argv[i], untrusted, trusted, crls, show_chain,
+                          vfyopts) != 1)
+                    ret = -1;
+        }
     }
 
  end:
@@ -390,4 +426,169 @@ static int cb(int ok, X509_STORE_CTX *ctx)
     if (!v_verbose)
         ERR_clear_error();
     return ok;
+}
+
+static int check_dual(X509_STORE *ctx, const char *file1, const char *file2,
+                      STACK_OF(X509) *uchain, STACK_OF(X509) *tchain,
+                      STACK_OF(X509_CRL) *crls, int show_chain,
+                      STACK_OF(OPENSSL_STRING) *opts, const char *classicCAfile, const char *pqCAfile)
+{
+    X509 *x1 = NULL, *x2 = NULL;
+    int ret = 0;
+    X509_STORE_CTX *csc1 = NULL, *csc2 = NULL;
+    STACK_OF(X509) *pqca_chain = NULL;
+    X509_STORE *store1 = NULL, *store2 = NULL;
+    
+    /* Load the first certificate (classic) */
+    x1 = load_cert(file1, FORMAT_UNDEF, "first certificate file");
+    if (x1 == NULL)
+        goto end;
+    
+    /* Load the second certificate (PQC) */
+    x2 = load_cert(file2, FORMAT_UNDEF, "second certificate file");
+    if (x2 == NULL)
+        goto end;
+    
+    /* Load PQC CA certificates if specified */
+    if (pqCAfile != NULL) {
+        if (!load_certs(pqCAfile, 0, &pqca_chain, NULL, "PQC CA certificates")) {
+            BIO_printf(bio_err, "Error loading PQC CA certificates from %s\n", pqCAfile);
+            goto end;
+        }
+    }
+    
+    /* Create separate stores for each CA */
+    store1 = X509_STORE_new();
+    store2 = X509_STORE_new();
+    if (store1 == NULL || store2 == NULL) {
+        BIO_printf(bio_err, "error: X.509 store allocation failed\n");
+        goto end;
+    }
+    
+    /* Load CA certificates into respective stores */
+    if (classicCAfile != NULL) {
+        STACK_OF(X509) *classic_ca_certs = NULL;
+        if (!load_certs(classicCAfile, 0, &classic_ca_certs, NULL, "classic CA certificates")) {
+            BIO_printf(bio_err, "Error loading classic CA certificates from %s\n", classicCAfile);
+            goto end;
+        }
+        /* Add CA certificates to store1 */
+        for (int i = 0; i < sk_X509_num(classic_ca_certs); i++) {
+            X509 *ca_cert = sk_X509_value(classic_ca_certs, i);
+            if (!X509_STORE_add_cert(store1, ca_cert)) {
+                BIO_printf(bio_err, "Error adding classic CA certificate to store\n");
+                goto end;
+            }
+        }
+        OSSL_STACK_OF_X509_free(classic_ca_certs);
+    } else {
+        BIO_printf(bio_err, "Error: classic CA file not specified\n");
+        goto end;
+    }
+    
+    if (pqCAfile != NULL) {
+        STACK_OF(X509) *pq_ca_certs = NULL;
+        if (!load_certs(pqCAfile, 0, &pq_ca_certs, NULL, "PQC CA certificates")) {
+            BIO_printf(bio_err, "Error loading PQC CA certificates\n");
+            goto end;
+        }
+        /* Add CA certificates to store2 */
+        for (int i = 0; i < sk_X509_num(pq_ca_certs); i++) {
+            X509 *ca_cert = sk_X509_value(pq_ca_certs, i);
+            if (!X509_STORE_add_cert(store2, ca_cert)) {
+                BIO_printf(bio_err, "Error adding PQC CA certificate to store\n");
+                goto end;
+            }
+        }
+        OSSL_STACK_OF_X509_free(pq_ca_certs);
+    }
+    
+    /* Verify first certificate with classic CA */
+    BIO_printf(bio_out, "Verifying first certificate: %s\n", file1);
+    csc1 = X509_STORE_CTX_new();
+    if (csc1 == NULL) {
+        BIO_printf(bio_err, "error: X.509 store context allocation failed\n");
+        goto end;
+    }
+    
+    if (!X509_STORE_CTX_init(csc1, store1, x1, uchain)) {
+        BIO_printf(bio_err, "error: X.509 store context initialization failed\n");
+        goto end;
+    }
+    
+    if (crls != NULL)
+        X509_STORE_CTX_set0_crls(csc1, crls);
+    
+    int result1 = X509_verify_cert(csc1);
+    if (result1 > 0) {
+        BIO_printf(bio_out, "%s: OK\n", file1);
+    } else {
+        BIO_printf(bio_err, "%s: verification failed\n", file1);
+        ERR_print_errors(bio_err);
+    }
+    
+    /* Verify second certificate with PQC CA */
+    BIO_printf(bio_out, "Verifying second certificate: %s\n", file2);
+    csc2 = X509_STORE_CTX_new();
+    if (csc2 == NULL) {
+        BIO_printf(bio_err, "error: X.509 store context allocation failed\n");
+        goto end;
+    }
+    
+    if (!X509_STORE_CTX_init(csc2, store2, x2, uchain)) {
+        BIO_printf(bio_err, "error: X.509 store context initialization failed\n");
+        goto end;
+    }
+    
+    if (crls != NULL)
+        X509_STORE_CTX_set0_crls(csc2, crls);
+    
+    int result2 = X509_verify_cert(csc2);
+    if (result2 > 0) {
+        BIO_printf(bio_out, "%s: OK\n", file2);
+    } else {
+        BIO_printf(bio_err, "%s: verification failed\n", file2);
+        ERR_print_errors(bio_err);
+    }
+    
+    /* Both certificates must be valid for dual verification to succeed */
+    if (result1 > 0 && result2 > 0) {
+        BIO_printf(bio_out, "Dual certificate verification: SUCCESS\n");
+        
+        /* Check for relatedCert extension */
+        int has_related_cert = X509_get_ext_by_NID(x2, NID_id_pe_relatedCert, -1) >= 0;
+        
+        if (has_related_cert) {
+            BIO_printf(bio_out, "Found relatedCert extension\n");
+            
+            /* Verify the relatedCert extension */
+            if (verify_related_certificate_extension(x2, x1) > 0) {
+                BIO_printf(bio_out, "relatedCert validation: SUCCESS\n");
+                BIO_printf(bio_out, "Dual verification with binding: SUCCESS\n");
+                ret = 1;
+            } else {
+                BIO_printf(bio_out, "relatedCert validation: FAILED\n");
+                BIO_printf(bio_out, "Dual verification with binding: FAILED\n");
+                ret = 0;
+            }
+        } else {
+            BIO_printf(bio_out, "No relatedCert extension - binding not required\n");
+            BIO_printf(bio_out, "Dual verification without binding: SUCCESS\n");
+            ret = 1;
+        }
+    } else {
+        BIO_printf(bio_out, "Dual certificate verification: FAILED\n");
+        ret = 0;
+    }
+    
+end:
+    X509_STORE_CTX_free(csc1);
+    X509_STORE_CTX_free(csc2);
+    X509_free(x1);
+    X509_free(x2);
+    X509_STORE_free(store1);
+    X509_STORE_free(store2);
+    OSSL_STACK_OF_X509_free(pqca_chain);
+    
+    return ret;
 }

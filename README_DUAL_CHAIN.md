@@ -71,7 +71,7 @@ sudo make install
 **Test Program**
 
 
-**Testing Process**
+**Testing Process*
 
 This section describes how to test the dual certificate implementation using OpenSSL 3.3.4 with OQS (Open Quantum Safe) support.
 
@@ -142,33 +142,21 @@ openssl x509 -req -in server_mldsa65_req.pem \
 ### Step 3: Test Dual Certificate Usage
 
 ```bash
-# Test dual certificate validation
-openssl s_server -cert server_classic_cert.pem -key server_classic_key.pem \
-    -pqcert server_pq_cert.pem -pqkey server_pq_key.pem -pqcafile ca_pq_cert.pem  -enable_dual_certs \
-    -accept 4433 -www
-
-# In another terminal, test client connection
-openssl s_client -connect localhost:4433 -CAfile ca_classic_cert.pem \
-    -pqcafile ca_pq_cert.pem -enable_dual_certs
-```
-
-### Step 4: Verification
-
-```bash
 # Verify classic certificate
 openssl x509 -in server_classic_cert.pem -text -noout
 
 # Verify PQC certificate
 openssl x509 -in server_pq_cert.pem -text -noout
-
-# Check dual certificate configuration
-openssl s_client -connect localhost:4433 -CAfile ca_classic_cert.pem \
-    -pqcafile ca_pq_cert.pem -enable_dual_certs -msg
 ```
 
-### Step 2: TLS Handshake Testing
+### Step 4: verification de certificat dual avec verify
+```bash
+openssl verify -dual -CAfile opensslForPQCert/test_dual_tls/ca_rsa.pem -pqcafile a_mldsa44_cert.pem server_rsa_cert.pem server_mldsa44_cert.pem
+```
 
-#### 2.1 Starting the OpenSSL Server
+### Step 5: TLS Handshake Testing
+
+#### 5.1 Starting the OpenSSL Server
 
 ```bash
 # Start the TLS server with dual certificates
@@ -193,7 +181,7 @@ Options used:
 - `-CAfile ca_rsa.pem` : Classic CA certificate for validation
 - `-pqcafile ca_mldsa65_cert.pem` : PQC CA certificate for validation
 
-#### 2.2 Connecting the OpenSSL Client
+#### 5.2 Connecting the OpenSSL Client
 
 ```bash
 # In another terminal, connect a TLS client
