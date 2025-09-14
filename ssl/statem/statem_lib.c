@@ -493,17 +493,13 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
             pq_key_type = EVP_PKEY_FALCON512;
         } else if (strstr(key_type_name, "falcon1024") != NULL) {
             pq_key_type = EVP_PKEY_FALCON1024;
-        } else if (strstr(key_type_name, "dilithium2") != NULL) {
-            pq_key_type = EVP_PKEY_DILITHIUM2;
-        } else if (strstr(key_type_name, "dilithium3") != NULL) {
-            pq_key_type = EVP_PKEY_DILITHIUM3;
-        } else if (strstr(key_type_name, "dilithium5") != NULL) {
-            pq_key_type = EVP_PKEY_DILITHIUM5;
         } else if (strstr(key_type_name, "mldsa") != NULL || strstr(key_type_name, "MLDSA") != NULL) {
             if (strstr(key_type_name, "44") != NULL) {
                 pq_key_type = EVP_PKEY_MLDSA_44;
             } else if (strstr(key_type_name, "65") != NULL) {
                 pq_key_type = EVP_PKEY_MLDSA_65;
+            } else if (strstr(key_type_name, "87") != NULL) {
+                pq_key_type = EVP_PKEY_MLDSA_87;
             } else {
                 pq_key_type = EVP_PKEY_MLDSA_44; /* Default MLDSA-44 if not specified */
             }
@@ -538,44 +534,7 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
             pq_sigalg = &falcon1024_sigalg;
             break;
             
-        case EVP_PKEY_DILITHIUM2:
-            /* Create SIGALG_LOOKUP for DILITHIUM-2 */
-            static const SIGALG_LOOKUP dilithium2_sigalg = {
-                .name = "DILITHIUM-2-SHA256",
-                .sig = EVP_PKEY_DILITHIUM2,
-                .hash = NID_sha256,
-                .sigalg = TLSEXT_SIGALG_dilithium2,  /* DILITHIUM-2 */
-                .hash_idx = SSL_MD_SHA256_IDX,
-                .sig_idx = SSL_PKEY_PQ_DILITHIUM_2
-            };
-            pq_sigalg = &dilithium2_sigalg;
-            break;
-            
-        case EVP_PKEY_DILITHIUM3:
-            /* Create SIGALG_LOOKUP for DILITHIUM-3 */
-            static const SIGALG_LOOKUP dilithium3_sigalg = {
-                .name = "DILITHIUM-3-SHA256",
-                .sig = EVP_PKEY_DILITHIUM3,
-                .hash = NID_sha256,
-                .sigalg = TLSEXT_SIGALG_dilithium3,
-                .hash_idx = SSL_MD_SHA256_IDX,
-                .sig_idx = SSL_PKEY_PQ_DILITHIUM_3
-            };
-            pq_sigalg = &dilithium3_sigalg;
-            break;
-            
-        case EVP_PKEY_DILITHIUM5:
-            /* Create SIGALG_LOOKUP for DILITHIUM-5 */
-            static const SIGALG_LOOKUP dilithium5_sigalg = {
-                .name = "DILITHIUM-5-SHA256",
-                .sig = EVP_PKEY_DILITHIUM5,
-                .hash = NID_sha256,
-                .sigalg = TLSEXT_SIGALG_dilithium5,
-                .hash_idx = SSL_MD_SHA256_IDX,
-                .sig_idx = SSL_PKEY_PQ_DILITHIUM_5
-            };
-            pq_sigalg = &dilithium5_sigalg;
-            break;
+        
             
         case EVP_PKEY_MLDSA_44:
             static const SIGALG_LOOKUP mldsa44_sigalg = {
@@ -598,6 +557,17 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
                 .sig_idx = SSL_PKEY_PQ_MLDSA_65
             };
             pq_sigalg = &mldsa65_sigalg;
+            break;
+        case EVP_PKEY_MLDSA_87:
+            static const SIGALG_LOOKUP mldsa87_sigalg = {
+                .name = "MLDSA-65-SHA256",
+                .sig = EVP_PKEY_MLDSA_87,
+                .hash = NID_sha256,
+                .sigalg = TLSEXT_SIGALG_mldsa_87,
+                .hash_idx = SSL_MD_SHA256_IDX,
+                .sig_idx = SSL_PKEY_PQ_MLDSA_87
+            };
+            pq_sigalg = &mldsa87_sigalg;
             break;
         default:
             printf("[PQ_CERT] Unsupported PQC key type: %d\n", pq_key_type);
@@ -958,22 +928,14 @@ MSG_PROCESS_RETURN tls_process_pq_certificate_verify(SSL_CONNECTION *s, PACKET *
 
             } else if (strstr(key_type_name, "falcon1024") != NULL) {
                 pq_key_type = EVP_PKEY_FALCON1024;
-
-            } else if (strstr(key_type_name, "dilithium2") != NULL) {
-                pq_key_type = EVP_PKEY_DILITHIUM2;
-
-            } else if (strstr(key_type_name, "dilithium3") != NULL) {
-                pq_key_type = EVP_PKEY_DILITHIUM3;
-
-            } else if (strstr(key_type_name, "dilithium5") != NULL) {
-                pq_key_type = EVP_PKEY_DILITHIUM5;
-
             } else if (strstr(key_type_name, "mldsa") != NULL || strstr(key_type_name, "MLDSA") != NULL) {
                 if (strstr(key_type_name, "44") != NULL) {
                     pq_key_type = EVP_PKEY_MLDSA_44;
 
                 } else if (strstr(key_type_name, "65") != NULL) {
                     pq_key_type = EVP_PKEY_MLDSA_65;
+                } else if (strstr(key_type_name, "87") != NULL) {
+                    pq_key_type = EVP_PKEY_MLDSA_87;
 
                 } else {
                     pq_key_type = EVP_PKEY_MLDSA_44; /* Default MLDSA-44 if not specified */
@@ -1009,46 +971,6 @@ MSG_PROCESS_RETURN tls_process_pq_certificate_verify(SSL_CONNECTION *s, PACKET *
                 };
                 pq_sigalg_to_use = &falcon1024_sigalg;
                 break;
-                
-            case EVP_PKEY_DILITHIUM2:
-                /* Create SIGALG_LOOKUP for DILITHIUM-2 */
-                static const SIGALG_LOOKUP dilithium2_sigalg = {
-                    .name = "DILITHIUM-2-SHA256",
-                    .sig = EVP_PKEY_DILITHIUM2,
-                    .hash = NID_sha256,
-                    .sigalg = TLSEXT_SIGALG_dilithium2,  /* DILITHIUM-2 */
-                    .hash_idx = SSL_MD_SHA256_IDX,
-                    .sig_idx = SSL_PKEY_PQ_DILITHIUM_2
-                };
-                pq_sigalg_to_use = &dilithium2_sigalg;
-                break;
-                
-            case EVP_PKEY_DILITHIUM3:
-                /* Create SIGALG_LOOKUP for DILITHIUM-3 */
-                static const SIGALG_LOOKUP dilithium3_sigalg = {
-                    .name = "DILITHIUM-3-SHA256",
-                    .sig = EVP_PKEY_DILITHIUM3,
-                    .hash = NID_sha256,
-                    .sigalg = TLSEXT_SIGALG_dilithium3,  /* DILITHIUM-3 */
-                    .hash_idx = SSL_MD_SHA256_IDX,
-                    .sig_idx = SSL_PKEY_PQ_DILITHIUM_3
-                };
-                pq_sigalg_to_use = &dilithium3_sigalg;
-                break;
-                
-            case EVP_PKEY_DILITHIUM5:
-                /* Create SIGALG_LOOKUP for DILITHIUM-5 */
-                static const SIGALG_LOOKUP dilithium5_sigalg = {
-                    .name = "DILITHIUM-5-SHA256",
-                    .sig = EVP_PKEY_DILITHIUM5,
-                    .hash = NID_sha256,
-                    .sigalg = TLSEXT_SIGALG_dilithium5,  /* DILITHIUM-5 */
-                    .hash_idx = SSL_MD_SHA256_IDX,
-                    .sig_idx = SSL_PKEY_PQ_DILITHIUM_5
-                };
-                pq_sigalg_to_use = &dilithium5_sigalg;
-                break;
-                
             case EVP_PKEY_MLDSA_44:
                 static const SIGALG_LOOKUP mldsa44_sigalg = {
                     .name = "MLDSA-44-SHA256",
@@ -1071,6 +993,17 @@ MSG_PROCESS_RETURN tls_process_pq_certificate_verify(SSL_CONNECTION *s, PACKET *
                 };
                 pq_sigalg_to_use = &mldsa65_sigalg;
                 break;
+            case EVP_PKEY_MLDSA_87:
+                static const SIGALG_LOOKUP mldsa87_sigalg = {
+                    .name = "MLDSA-87-SHA256",
+                    .sig = EVP_PKEY_MLDSA_87,
+                    .hash = NID_sha256,
+                    .sigalg = TLSEXT_SIGALG_mldsa_87,
+                    .hash_idx = SSL_MD_SHA256_IDX,
+                    .sig_idx = SSL_PKEY_PQ_MLDSA_87
+                };
+                pq_sigalg_to_use = &mldsa87_sigalg;
+                break;    
             default:
                 printf("[PQ_CERT_VERIFY_PROCESS] ERROR: Unsupported PQC key type: %d\n", pq_key_type);
                 SSLfatal(s, SSL_AD_INSUFFICIENT_SECURITY, SSL_R_NO_SUITABLE_SIGNATURE_ALGORITHM);

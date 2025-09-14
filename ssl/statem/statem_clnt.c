@@ -2687,17 +2687,7 @@ MSG_PROCESS_RETURN tls_process_key_exchange(SSL_CONNECTION *s, PACKET *pkt)
                     .sig_idx = SSL_PKEY_PQ_FALCON_1024
                 };
                     pq_sigalg = &falcon1024_sigalg;
-                } else if (sig_nid == 1001) { /* NID_dilithium2 */
-                    /* Create a SIGALG_LOOKUP for dilithium2 */
-                    static const SIGALG_LOOKUP dilithium2_sigalg = {
-                        .name = "DILITHIUM-2-SHA256",
-                        .sig = EVP_PKEY_DILITHIUM2,
-                        .hash = NID_sha256,
-                        .sigalg = TLSEXT_SIGALG_dilithium2,  /* DILITHIUM-2-SHA256 */
-                        .hash_idx = SSL_MD_SHA256_IDX,
-                        .sig_idx = SSL_PKEY_PQ_DILITHIUM_2
-                    };
-                    pq_sigalg = &dilithium2_sigalg;
+               
                 } else {
                     /* Create a generic PQC sigalg as fallback */
                     static const SIGALG_LOOKUP generic_pqc_sigalg = {

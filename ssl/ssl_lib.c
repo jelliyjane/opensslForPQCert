@@ -8163,11 +8163,7 @@ KEY_TYPE get_key_type_from_evp_pkey(const EVP_PKEY *pkey) {
 #ifdef NID_dilithium3
         case NID_dilithium3:
 #endif
-#ifdef NID_dilithium5
-        case NID_dilithium5:
-#endif
-            result = KEY_TYPE_DILITHIUM;
-            break;
+
 #ifdef NID_falcon512
         case NID_falcon512:
 #endif
@@ -8207,8 +8203,6 @@ KEY_TYPE get_key_type_from_evp_pkey(const EVP_PKEY *pkey) {
                 if (key_type_name != NULL) {
                     if (strstr(key_type_name, "falcon") != NULL || strstr(key_type_name, "FALCON") != NULL) {
                         result = KEY_TYPE_FALCON;
-                    } else if (strstr(key_type_name, "dilithium") != NULL || strstr(key_type_name, "DILITHIUM") != NULL) {
-                        result = KEY_TYPE_DILITHIUM;
                     } else if (strstr(key_type_name, "mldsa") != NULL || strstr(key_type_name, "MLDSA") != NULL) {
                         result = KEY_TYPE_MLDSA;
                     } else if (strstr(key_type_name, "sphincs") != NULL || strstr(key_type_name, "SPHINCS") != NULL) {
@@ -8217,8 +8211,6 @@ KEY_TYPE get_key_type_from_evp_pkey(const EVP_PKEY *pkey) {
                         /* Size-based detection as fallback */
                         if (key_size >= 800 && key_size <= 1200) {
                             result = KEY_TYPE_FALCON;
-                        } else if (key_size >= 1000 && key_size <= 2000) {
-                            result = KEY_TYPE_DILITHIUM;
                         } else if (key_size >= 2000 && key_size <= 4000) {
                             result = KEY_TYPE_MLDSA;
                         } else {
@@ -8229,8 +8221,6 @@ KEY_TYPE get_key_type_from_evp_pkey(const EVP_PKEY *pkey) {
                     /* Size-based detection when no name available */
                     if (key_size >= 800 && key_size <= 1200) {
                         result = KEY_TYPE_FALCON;
-                    } else if (key_size >= 1000 && key_size <= 2000) {
-                        result = KEY_TYPE_DILITHIUM;
                     } else if (key_size >= 2000 && key_size <= 4000) {
                         result = KEY_TYPE_MLDSA;
                     } else {

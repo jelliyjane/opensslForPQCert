@@ -1972,15 +1972,7 @@ int tls12_check_peer_sigalg(SSL_CONNECTION *s, uint16_t sig, EVP_PKEY *pkey)
                     case TLSEXT_SIGALG_falcon1024: /* FALCON-1024-SHA256 */
                         pkeyid = EVP_PKEY_FALCON1024;
                         break;
-                    case TLSEXT_SIGALG_dilithium2: /* DILITHIUM-2-SHA256 */
-                        pkeyid = EVP_PKEY_DILITHIUM2;
-                        break;
-                    case TLSEXT_SIGALG_dilithium3: /* DILITHIUM-3-SHA256 */
-                        pkeyid = EVP_PKEY_DILITHIUM3;
-                        break;
-                    case TLSEXT_SIGALG_dilithium5: /* DILITHIUM-5-SHA256 */
-                        pkeyid = EVP_PKEY_DILITHIUM5;
-                        break;
+                
                     case TLSEXT_SIGALG_sphincs_sha256_128f_simple: /* SPHINCS-SHA256-128F-SIMPLE */
                         pkeyid = EVP_PKEY_SPHINCS_PLUS_SHA256_128F_SIMPLE;
                         break;
@@ -1995,6 +1987,9 @@ int tls12_check_peer_sigalg(SSL_CONNECTION *s, uint16_t sig, EVP_PKEY *pkey)
                         break;
                     case TLSEXT_SIGALG_mldsa_65: /* MLDSA-65-SHA256 */
                         pkeyid = EVP_PKEY_MLDSA_65;
+                        break;
+                    case TLSEXT_SIGALG_mldsa_87: /* MLDSA-87-SHA256 */
+                        pkeyid = EVP_PKEY_MLDSA_87;
                         break;
                     default:
                         break;
@@ -4245,14 +4240,12 @@ __owur int tls13_set_encoded_pub_key(EVP_PKEY *pkey,
 static const uint16_t tls12_pq_sigalgs[] = {
     TLSEXT_SIGALG_falcon512, 
     TLSEXT_SIGALG_falcon1024, 
-    TLSEXT_SIGALG_dilithium2, 
-    TLSEXT_SIGALG_dilithium3, 
-    TLSEXT_SIGALG_dilithium5, 
     TLSEXT_SIGALG_sphincs_sha256_128f_simple, 
     TLSEXT_SIGALG_sphincs_sha256_192f_simple, 
     TLSEXT_SIGALG_sphincs_sha256_256f_simple, 
     TLSEXT_SIGALG_mldsa_44, 
-    TLSEXT_SIGALG_mldsa_65, 
+    TLSEXT_SIGALG_mldsa_65,
+    TLSEXT_SIGALG_mldsa_87, 
 };
 
 /* PQ signature algorithm lookup table -  IANA STANDARDS */
@@ -4263,17 +4256,6 @@ static const SIGALG_LOOKUP pq_sigalg_lookup_tbl[] = {
      NID_undef, NID_undef, 1},
     {"FALCON-1024-SHA256", TLSEXT_SIGALG_falcon1024,
      NID_sha256, SSL_MD_SHA256_IDX, EVP_PKEY_FALCON1024, SSL_PKEY_PQ_FALCON_1024,
-     NID_undef, NID_undef, 1},
-    
-    /* DILITHIUM - IANA codes 0x09xx */
-    {"DILITHIUM-2-SHA256", TLSEXT_SIGALG_dilithium2,
-     NID_sha256, SSL_MD_SHA256_IDX, EVP_PKEY_DILITHIUM2, SSL_PKEY_PQ_DILITHIUM_2,
-     NID_undef, NID_undef, 1},
-    {"DILITHIUM-3-SHA256", TLSEXT_SIGALG_dilithium3,
-     NID_sha256, SSL_MD_SHA256_IDX, EVP_PKEY_DILITHIUM3, SSL_PKEY_PQ_DILITHIUM_3,
-     NID_undef, NID_undef, 1},
-    {"DILITHIUM-5-SHA256", TLSEXT_SIGALG_dilithium5,
-     NID_sha256, SSL_MD_SHA256_IDX, EVP_PKEY_DILITHIUM5, SSL_PKEY_PQ_DILITHIUM_5,
      NID_undef, NID_undef, 1},
     
     /* SPHINCS+ - IANA codes 0x09xx */
@@ -4294,7 +4276,10 @@ static const SIGALG_LOOKUP pq_sigalg_lookup_tbl[] = {
     {"MLDSA-65-SHA256", TLSEXT_SIGALG_mldsa_65,
      NID_sha256, SSL_MD_SHA256_IDX, EVP_PKEY_MLDSA_65, SSL_PKEY_PQ_MLDSA_65,
      NID_undef, NID_undef, 1},
-    /* MLDSA-87 not yet implemented in OpenSSL */
+    
+    {"MLDSA-87-SHA256", TLSEXT_SIGALG_mldsa_87,
+     NID_sha256, SSL_MD_SHA256_IDX, EVP_PKEY_MLDSA_87, SSL_PKEY_PQ_MLDSA_87,
+     NID_undef, NID_undef, 1},
 };
 
 /* Get PQ signature algorithms for dual certificate mode */
@@ -4469,12 +4454,6 @@ int tls1_get_pq_security_bits(uint16_t sigalg)
             return 128; /* Level 1 security */
         case TLSEXT_SIGALG_falcon1024: /* FALCON-1024-SHA256 */
             return 256; /* Level 5 security */
-        case TLSEXT_SIGALG_dilithium2: /* DILITHIUM-2-SHA256 */
-            return 128; /* Level 1 security */
-        case TLSEXT_SIGALG_dilithium3: /* DILITHIUM-3-SHA256 */
-            return 192; /* Level 3 security */
-        case TLSEXT_SIGALG_dilithium5: /* DILITHIUM-5-SHA256 */
-            return 256; /* Level 5 security */
         case TLSEXT_SIGALG_sphincs_sha256_128f_simple: /* SPHINCS-SHA256-128F-SIMPLE */
             return 128; /* Level 1 security */
         case TLSEXT_SIGALG_sphincs_sha256_192f_simple: /* SPHINCS-SHA256-192F-SIMPLE */
@@ -4485,17 +4464,12 @@ int tls1_get_pq_security_bits(uint16_t sigalg)
             return 128; /* Level 1 security */
         case TLSEXT_SIGALG_mldsa_65: /* MLDSA-65-SHA256 */
             return 192; /* Level 3 security */
-        
+        case TLSEXT_SIGALG_mldsa_87: /* MLDSA-87-SHA256 */
+            return 256; /* Level 3 security */
         /* 0x04xx algorithms (legacy format) */
         case 0x0401: /* FALCON-512 */
             return 128;
         case 0x0402: /* FALCON-1024 */
-            return 256;
-        case 0x0403: /* DILITHIUM-2 */
-            return 128;
-        case 0x0404: /* DILITHIUM-3 */
-            return 192;
-        case 0x0405: /* DILITHIUM-5 */
             return 256;
         case 0x0406: /* SPHINCS-128F */
             return 128;
@@ -4627,12 +4601,7 @@ static int get_pqc_key_type_enhanced(const EVP_PKEY *pq_pkey)
     
     /* Check by key type name first (more reliable) */
     if (key_type_name != NULL) {
-        if (strstr(key_type_name, "dilithium") != NULL) {
-            if (strstr(key_type_name, "dilithium2") != NULL) return KEY_TYPE_DILITHIUM;
-            if (strstr(key_type_name, "dilithium3") != NULL) return KEY_TYPE_DILITHIUM;
-            if (strstr(key_type_name, "dilithium5") != NULL) return KEY_TYPE_DILITHIUM;
-            return KEY_TYPE_DILITHIUM;
-        }
+        
         if (strstr(key_type_name, "falcon") != NULL) {
             if (strstr(key_type_name, "falcon512") != NULL) return KEY_TYPE_FALCON;
             if (strstr(key_type_name, "falcon1024") != NULL) return KEY_TYPE_FALCON;
@@ -4644,10 +4613,7 @@ static int get_pqc_key_type_enhanced(const EVP_PKEY *pq_pkey)
     
     /* Fallback to key ID checking */
     switch (key_id) {
-        case EVP_PKEY_DILITHIUM2:
-        case EVP_PKEY_DILITHIUM3:
-        case EVP_PKEY_DILITHIUM5:
-            return KEY_TYPE_DILITHIUM;
+    
         case EVP_PKEY_FALCON512:
         case EVP_PKEY_FALCON1024:
             return KEY_TYPE_FALCON;
@@ -4657,14 +4623,14 @@ static int get_pqc_key_type_enhanced(const EVP_PKEY *pq_pkey)
             return KEY_TYPE_SPHINCS;
         case EVP_PKEY_MLDSA_44:
         case EVP_PKEY_MLDSA_65:
+        case EVP_PKEY_MLDSA_87:
             return KEY_TYPE_MLDSA;
         case -1: /* Unknown NID, try name-based detection */
             if (key_type_name != NULL) {
                 /* Name-based detection for PQC algorithms */
                 if (strstr(key_type_name, "falcon") != NULL || strstr(key_type_name, "FALCON") != NULL) {
                     return KEY_TYPE_FALCON;
-                } else if (strstr(key_type_name, "dilithium") != NULL || strstr(key_type_name, "DILITHIUM") != NULL) {
-                    return KEY_TYPE_DILITHIUM;
+                
                 } else if (strstr(key_type_name, "mldsa") != NULL || strstr(key_type_name, "MLDSA") != NULL) {
                     return KEY_TYPE_MLDSA;
                 } else if (strstr(key_type_name, "sphincs") != NULL || strstr(key_type_name, "SPHINCS") != NULL) {
@@ -4678,7 +4644,6 @@ static int get_pqc_key_type_enhanced(const EVP_PKEY *pq_pkey)
             /* Try alternative detection methods */
             if (key_type_name != NULL) {
                 /* Additional name-based detection */
-                if (strstr(key_type_name, "dilithium") != NULL) return KEY_TYPE_DILITHIUM;
                 if (strstr(key_type_name, "falcon") != NULL) return KEY_TYPE_FALCON;
                 if (strstr(key_type_name, "sphincs") != NULL) return KEY_TYPE_SPHINCS;
                 if (strstr(key_type_name, "mldsa") != NULL) return KEY_TYPE_MLDSA;
@@ -4701,9 +4666,7 @@ static int get_pqc_key_type_by_properties(const EVP_PKEY *pq_pkey)
     /* Estimate key type based on size and other properties */
     if (key_size > 0) {
         /* These are rough estimates based on typical PQC key sizes */
-        if (key_size >= 1000 && key_size <= 2000) {
-            return KEY_TYPE_DILITHIUM;
-        }
+        
         if (key_size >= 800 && key_size <= 1200) {
             return KEY_TYPE_FALCON;
         }
@@ -4763,8 +4726,7 @@ int tls1_separate_dual_cert_chains(SSL_CONNECTION *s,
                 SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_MALLOC_FAILURE);
                 return 0;
             }
-        } else if (cert_type == KEY_TYPE_DILITHIUM || cert_type == KEY_TYPE_FALCON ||
-                   cert_type == KEY_TYPE_SPHINCS || cert_type == KEY_TYPE_MLDSA) {
+        } else if (cert_type == KEY_TYPE_FALCON || cert_type == KEY_TYPE_SPHINCS || cert_type == KEY_TYPE_MLDSA) {
             /* Post-quantum certificate */
             if (!sk_X509_push(*pq_chain, cert)) {
                 SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_MALLOC_FAILURE);

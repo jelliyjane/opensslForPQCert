@@ -18,6 +18,7 @@
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
 #include <openssl/pem.h>
+#include <openssl/ssl.h>
 #include <openssl/engine.h>
 #include <openssl/rand.h>
 #include <openssl/ui.h>

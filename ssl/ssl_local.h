@@ -2313,9 +2313,6 @@ typedef enum downgrade_en {
 /* Post-quantum signature algorithms */
 #define TLSEXT_SIGALG_falcon512                                 0x0901
 #define TLSEXT_SIGALG_falcon1024                                0x0902
-#define TLSEXT_SIGALG_dilithium2                                0x0903
-#define TLSEXT_SIGALG_dilithium3                                0x0904
-#define TLSEXT_SIGALG_dilithium5                                0x0905
 #define TLSEXT_SIGALG_sphincs_sha256_128f_simple                0x0906
 #define TLSEXT_SIGALG_sphincs_sha256_192f_simple                0x0907
 #define TLSEXT_SIGALG_sphincs_sha256_256f_simple                0x0908
@@ -2324,7 +2321,7 @@ typedef enum downgrade_en {
 #define TLSEXT_SIGALG_ecdsa_brainpoolP512r1_sha512              0x081c
 #define TLSEXT_SIGALG_mldsa_44                                  0x0909
 #define TLSEXT_SIGALG_mldsa_65                                  0x090A
-
+#define TLSEXT_SIGALG_mldsa_87                                  0x090B
 
 /* RelatedCertificate extension */
 #define TLSEXT_TYPE_related_certificate                         0x0011  
@@ -3211,15 +3208,13 @@ long ossl_ctrl_internal(SSL *s, int cmd, long larg, void *parg, int no_quic);
 /* Post-quantum certificate key types for dual certificate mode */
 # define SSL_PKEY_PQ_MLDSA_44           10
 # define SSL_PKEY_PQ_MLDSA_65           11
-# define SSL_PKEY_PQ_FALCON_512         12
-# define SSL_PKEY_PQ_FALCON_1024        13
-# define SSL_PKEY_PQ_DILITHIUM_2        14
-# define SSL_PKEY_PQ_DILITHIUM_3        15
-# define SSL_PKEY_PQ_DILITHIUM_5        16
-# define SSL_PKEY_PQ_SPHINCS_128F       17
-# define SSL_PKEY_PQ_SPHINCS_192F       18
-# define SSL_PKEY_PQ_SPHINCS_256F       19
-# define SSL_PKEY_PQ_NUM                20
+# define SSL_PKEY_PQ_MLDSA_87           12
+# define SSL_PKEY_PQ_FALCON_512         13
+# define SSL_PKEY_PQ_FALCON_1024        14
+# define SSL_PKEY_PQ_SPHINCS_128F       15
+# define SSL_PKEY_PQ_SPHINCS_192F       16
+# define SSL_PKEY_PQ_SPHINCS_256F       17
+# define SSL_PKEY_PQ_NUM                18
 
 typedef enum {
     KEY_TYPE_UNKNOWN = 0,
@@ -3227,7 +3222,6 @@ typedef enum {
     KEY_TYPE_EC,
     KEY_TYPE_ED25519,
     KEY_TYPE_ED448,
-    KEY_TYPE_DILITHIUM,
     KEY_TYPE_FALCON,
     KEY_TYPE_SPHINCS,
     KEY_TYPE_MLDSA,

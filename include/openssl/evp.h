@@ -82,9 +82,7 @@
 # define EVP_PKEY_ED448 NID_ED448
 
 /* PQC Key Types - Using placeholder values until proper NIDs are defined */
-# define EVP_PKEY_DILITHIUM2     1001
-# define EVP_PKEY_DILITHIUM3     1002
-# define EVP_PKEY_DILITHIUM5     1003
+
 # define EVP_PKEY_FALCON512      1004
 # define EVP_PKEY_FALCON1024     1005
 # define EVP_PKEY_SPHINCS_PLUS_SHA256_128F_SIMPLE  1006
@@ -92,7 +90,7 @@
 # define EVP_PKEY_SPHINCS_PLUS_SHA256_256F_SIMPLE  1008
 # define EVP_PKEY_MLDSA_44       1009
 # define EVP_PKEY_MLDSA_65       1010
-
+# define EVP_PKEY_MLDSA_87       1011
 /* Special indicator that the object is uniquely provider side */
 # define EVP_PKEY_KEYMGMT -1
 

@@ -2121,12 +2121,6 @@ int is_valid_pq_signature_algorithm(uint16_t sigalg)
         return 1;
     case TLSEXT_SIGALG_falcon1024:
         return 1;
-    case TLSEXT_SIGALG_dilithium2:
-        return 1;
-    case TLSEXT_SIGALG_dilithium3:
-        return 1;
-    case TLSEXT_SIGALG_dilithium5:
-        return 1;
     case TLSEXT_SIGALG_sphincs_sha256_128f_simple:
         return 1;
     case TLSEXT_SIGALG_sphincs_sha256_192f_simple:
@@ -2136,6 +2130,8 @@ int is_valid_pq_signature_algorithm(uint16_t sigalg)
     case TLSEXT_SIGALG_mldsa_44:
         return 1;
     case TLSEXT_SIGALG_mldsa_65:
+        return 1;
+    case TLSEXT_SIGALG_mldsa_87:
         return 1;
     default:
         return 0;
@@ -2227,7 +2223,6 @@ int get_dual_pq_sigalgs(SSL_CONNECTION *s, const uint16_t **psigs, size_t *psigs
         /* Fallback to default PQ algorithms */
         static const uint16_t default_pq_sigs[] = {
             TLSEXT_SIGALG_falcon512,
-            TLSEXT_SIGALG_dilithium2,
             TLSEXT_SIGALG_sphincs_sha256_128f_simple
         };
         
@@ -2259,7 +2254,6 @@ int get_dual_pq_sigalgs(SSL_CONNECTION *s, const uint16_t **psigs, size_t *psigs
         /* Fallback to default PQ algorithms */
         static const uint16_t default_pq_sigs[] = {
             TLSEXT_SIGALG_falcon512,
-            TLSEXT_SIGALG_dilithium2,
             TLSEXT_SIGALG_sphincs_sha256_128f_simple
         };
         
