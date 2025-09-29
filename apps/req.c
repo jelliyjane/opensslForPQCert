@@ -492,6 +492,11 @@ int req_main(int argc, char **argv)
     if (!app_RAND_load())
         goto end;
 
+
+    int nid = OBJ_txt2nid("deltaCertificateDescriptor");
+    if (X509V3_EXT_get_nid(nid) == NULL)
+        fprintf(stderr, "hello\n");
+
     if (!gen_x509) {
         if (days != UNSET_DAYS)
             BIO_printf(bio_err, "Ignoring -days without -x509; not generating a certificate\n");

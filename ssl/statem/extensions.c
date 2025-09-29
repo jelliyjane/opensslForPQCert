@@ -426,6 +426,16 @@ static const EXTENSION_DEFINITION ext_defs[] = {
         | SSL_EXT_TLS_IMPLEMENTATION_ONLY | SSL_EXT_TLS1_3_ONLY,
         NULL, tls_parse_ctos_psk, tls_parse_stoc_psk, tls_construct_stoc_psk,
         tls_construct_ctos_psk, final_psk
+    },
+    {
+        TLSEXT_TYPE_hybrid_cert_hint,
+        SSL_EXT_CLIENT_HELLO | SSL_EXT_TLS1_3_ONLY,
+        NULL,
+        tls_parse_ctos_hybrid_cert_hint,
+        NULL,
+        NULL, 
+        tls_construct_ctos_hybrid_cert_hint,
+        NULL
     }
 };
 

@@ -1202,6 +1202,19 @@ typedef struct cert_pkey_st CERT_PKEY;
 #define SSL_TYPE_QUIC_CONNECTION 1
 #define SSL_TYPE_QUIC_XSO        2
 
+/* Using hybrid certficate in tls*/
+# define TLSEXT_TYPE_hybrid_cert_hint 0xFF10
+# define HYBCERT_MAX 3
+
+/* Hybrid certificate status field*/
+typedef struct {
+    unsigned int has_hybrid_cert_hint:1;
+    unsigned char ext_version;
+    unsigned char hybrid_verify;
+    unsigned char num_types;
+    unsigned char types[HYBCERT_MAX];
+} HYBRID_CERT_HINT;
+
 struct ssl_st {
     int type;
     SSL_CTX *ctx;
@@ -1211,6 +1224,7 @@ struct ssl_st {
     CRYPTO_RWLOCK *lock;
     /* extra application data */
     CRYPTO_EX_DATA ex_data;
+    HYBRID_CERT_HINT hybrid_hint;
 };
 
 struct ssl_connection_st {

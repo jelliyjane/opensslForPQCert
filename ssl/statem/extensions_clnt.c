@@ -12,6 +12,11 @@
 #include "internal/cryptlib.h"
 #include "statem_local.h"
 
+#include "internal/ssl.h"
+#include "internal/packet.h"
+#include <openssl/tls1.h>
+#include <openssl/ssl.h>
+
 EXT_RETURN tls_construct_ctos_renegotiate(SSL_CONNECTION *s, WPACKET *pkt,
                                           unsigned int context, X509 *x,
                                           size_t chainidx)
@@ -1213,6 +1218,59 @@ EXT_RETURN tls_construct_ctos_post_handshake_auth(SSL_CONNECTION *s, WPACKET *pk
 #endif
 }
 
+EXT_RETURN tls_construct_ctos_hybrid_cert_hint(SSL_CONNECTION *s, WPACKET *pkt,
+                                               unsigned int context,
+                                               X509 *x, size_t chainidx)
+{
+#ifndef OPENSSL_NO_TLS1_3
+    unsigned char v = s->ssl.hybrid_hint.ext_version ? s->ssl.hybrid_hint.ext_version : 2; // Extension version
+    unsigned char hv = s->ssl.hybrid_hint.hybrid_verify ? 1 : 0; // Hybrid verify
+    unsigned char n = s->ssl.hybrid_hint.num_types;
+    if (v != 2 || n == 0) {
+        v = 1; hv = 1; n = 1;
+        s->ssl.hybrid_hint.types[0] = HYBCERT_DUAL;
+    }
+    
+#ifndef OPENSSL_NO_TRACE
+    OSSL_TRACE2(TLS, "ctos hybrid_cert_hint: ct=%u hv=1\n", ct);
+#endif
+    if (!WPACKET_put_bytes_u16(pkt, TLSEXT_TYPE_hybrid_cert_hint) ||
+        !WPACKET_start_sub_packet_u16(pkt))
+        goto err;
+
+    if (v == 1) {
+        if (!WPACKET_put_bytes_u8(pkt, 1)
+        || !WPACKET_put_bytes_u8(pkt, s->ssl.hybrid_hint.types[0])
+        || !WPACKET_put_bytes_u8(pkt, hv)
+        || !WPACKET_put_bytes_u8(pkt, 0))
+        goto err;
+    } else {
+        size_t i;
+        if (!WPACKET_put_bytes_u8(pkt, 2)   || 
+            !WPACKET_put_bytes_u8(pkt, hv)  ||
+            !WPACKET_put_bytes_u8(pkt, n))
+            goto err;
+        
+        for (i = 0; i < n; i++) {
+            if (!WPACKET_put_bytes_u8(pkt, s->ssl.hybrid_hint.types[i]))
+                goto err;
+        }
+        if (!WPACKET_put_bytes_u8(pkt, 0))
+            goto err;
+    }
+        
+    if (!WPACKET_close(pkt))
+        goto err;
+
+    return EXT_RETURN_SENT;
+
+err:
+    SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
+    return EXT_RETURN_FAIL;
+#else
+    return EXT_RETURN_NOT_SENT;
+#endif
+}
 
 /*
  * Parse the server's renegotiation binding and abort if it's not right

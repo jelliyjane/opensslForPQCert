@@ -68,6 +68,10 @@ typedef unsigned int u_int;
 #define USER_DATA_PROCESS_NO_DATA      3
 #define USER_DATA_PROCESS_CONTINUE     4
 
+#ifndef HYBCERT_MAX
+# define HYBCERT_MAX 3
+#endif
+
 struct user_data_st {
     /* SSL connection we are processing commands for */
     SSL *con;
@@ -119,6 +123,48 @@ static const unsigned char cert_type_rpk[] = { TLSEXT_cert_type_rpk, TLSEXT_cert
 static int enable_server_rpk = 0;
 
 static int saved_errno;
+
+static unsigned char opt_hybcert_list[HYBCERT_MAX];
+static size_t opt_hybcert_n = 0;
+static int opt_hybcert_verify = 1;
+
+static int hybcert_str2code(const char *s, unsigned char *out)
+{
+    if (s == NULL || out == NULL) return 0;
+    if (OPENSSL_strcasecmp(s, "dual") == 0)         { *out = HYBCERT_DUAL; return 1; }
+    if (OPENSSL_strcasecmp(s, "chameleon") == 0)    { *out = HYBCERT_CHAMELEON; return 1; }
+    if (OPENSSL_strcasecmp(s, "catalyst") == 0)     { *out = HYBCERT_CATALYST; return 1; }
+    return 0;
+}
+
+static void trim_ws(char **p, char **q) {
+    while (*p < *q && isspace((unsigned char)**p)) (*p)++;
+    while (*q > *p && isspace((unsigned char)*((*q)-1))) (*q)--;
+}
+
+static int parse_hybcert_list(char *arg) {
+    char *p = arg;
+    while (*p) {
+        char *q = p;
+        while (*q && *q != ',') q++;
+        char *s = p, *e = q;
+        trim_ws(&s, &e);
+        if (s < e) {
+            unsigned char code;
+            char saved = *e; *e = '\0';
+            if (!hybcert_str2code(s, &code)) return 0;
+            *e = saved;
+            
+            size_t i; for (i = 0; i < opt_hybcert_n; i++) if (opt_hybcert_list[i] == code) goto next;
+            if (opt_hybcert_n >= HYBCERT_MAX) return 0;
+            opt_hybcert_list[opt_hybcert_n++] = code;
+        }
+next:
+        if (*q == ',') q++;
+        p = q;
+    }
+    return 1;
+}
 
 static void save_errno(void)
 {
@@ -483,7 +529,7 @@ typedef enum OPTION_choice {
     OPT_DEBUG, OPT_TLSEXTDEBUG, OPT_STATUS, OPT_WDEBUG,
     OPT_MSG, OPT_MSGFILE, OPT_ENGINE, OPT_TRACE, OPT_SECURITY_DEBUG,
     OPT_SECURITY_DEBUG_VERBOSE, OPT_SHOWCERTS, OPT_NBIO_TEST, OPT_STATE,
-    OPT_PSK_IDENTITY, OPT_PSK, OPT_PSK_SESS,
+    OPT_PSK_IDENTITY, OPT_PSK, OPT_PSK_SESS, OPT_HYBCERT,
 #ifndef OPENSSL_NO_SRP
     OPT_SRPUSER, OPT_SRPPASS, OPT_SRP_STRENGTH, OPT_SRP_LATEUSER,
     OPT_SRP_MOREGROUPS,
@@ -586,6 +632,8 @@ const OPTIONS s_client_options[] = {
      "Do not load certificates from the default certificates store"},
     {"requestCAfile", OPT_REQCAFILE, '<',
       "PEM format file of CA names to send to the server"},
+    {"hybcert", OPT_HYBCERT, 's', "Hybrid cert types: dual|chameleon|catalyst "
+                                   "(comma-separated, repeatable)" },
 #if defined(TCP_FASTOPEN) && !defined(OPENSSL_NO_TFO)
     {"tfo", OPT_TFO, '-', "Connect using TCP Fast Open"},
 #endif
@@ -1571,6 +1619,10 @@ int s_client_main(int argc, char **argv)
         case OPT_ENABLE_CLIENT_RPK:
             enable_client_rpk = 1;
             break;
+        case OPT_HYBCERT:
+            char *arg = opt_arg();
+            if (!parse_hybcert_list(arg)) { BIO_printf(bio_err, "-hybcert parse error\n"); goto end; }
+            break;
         }
     }
 
@@ -2068,6 +2120,14 @@ int s_client_main(int argc, char **argv)
     con = SSL_new(ctx);
     if (con == NULL)
         goto end;
+
+    if (opt_hybcert_n > 0) {
+        if (!SSL_set_hybrid_cert_hint_list(con, opt_hybcert_list, opt_hybcert_n,
+                                           opt_hybcert_verify)) {
+            BIO_printf(bio_err, "failed to set hybrid cert hint list\n");
+            goto end;
+        }
+    }
 
     if (enable_pha)
         SSL_set_post_handshake_auth(con, 1);

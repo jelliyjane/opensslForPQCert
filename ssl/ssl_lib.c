@@ -22,6 +22,7 @@
 #include <openssl/ct.h>
 #include <openssl/trace.h>
 #include <openssl/core_names.h>
+#include <openssl/ssl.h>
 #include "internal/cryptlib.h"
 #include "internal/nelem.h"
 #include "internal/refcount.h"
@@ -7854,4 +7855,32 @@ int SSL_CTX_get0_server_cert_type(const SSL_CTX *ctx, unsigned char **t, size_t 
     *t = ctx->server_cert_type;
     *len = ctx->server_cert_type_len;
     return 1;
+}
+
+int SSL_set_hybrid_cert_hint_list(SSL *ssl, 
+                                  unsigned char *types, size_t n,
+                                  int hybrid_verify)
+{
+    SSL_CONNECTION *sc = SSL_CONNECTION_FROM_SSL(ssl);
+    size_t i;
+    
+    if (ssl == NULL || sc == NULL || types == NULL) return 0;
+    if (n == 0 || n > HYBCERT_MAX) return 0;
+
+    sc->ssl.hybrid_hint.ext_version    = 2;
+    sc->ssl.hybrid_hint.hybrid_verify  = hybrid_verify ? 1 : 0;
+    sc->ssl.hybrid_hint.num_types      = (unsigned char)n;
+    
+    for (i = 0; i < n; i++) {
+        unsigned char ct = types[i];
+        if (ct > HYBCERT_CATALYST) return 0;
+        ssl->hybrid_hint.types[i] = ct;
+    }
+    ssl->hybrid_hint.has_hybrid_cert_hint = 1;
+    return 1;
+}
+
+int SSL_set_hybrid_cert_hint(SSL *ssl, unsigned char cert_type)
+{
+    return SSL_set_hybrid_cert_hint_list(ssl, &cert_type, 1, 1);
 }

@@ -11,6 +11,7 @@
 #include "../ssl_local.h"
 #include "statem_local.h"
 #include "internal/cryptlib.h"
+#include "internal/packet.h"
 
 #define COOKIE_STATE_FORMAT_VERSION     1
 
@@ -1302,6 +1303,110 @@ EXT_RETURN tls_construct_stoc_renegotiate(SSL_CONNECTION *s, WPACKET *pkt,
     }
 
     return EXT_RETURN_SENT;
+}
+
+int tls_parse_ctos_hybrid_cert_hint(SSL_CONNECTION *s, PACKET *pkt,
+                                    unsigned int context,
+                                    X509 *x, size_t chainidx)
+{
+#ifndef OPENSSL_NO_TLS1_3
+    unsigned int v;
+    size_t rem = PACKET_remaining(pkt);
+
+    if (rem < 4) { SSLfatal(s, SSL_AD_DECODE_ERROR, ERR_R_SSL_LIB); return 0; }
+
+    if (!PACKET_get_1(pkt, &v)) { SSLfatal(s, SSL_AD_DECODE_ERROR, ERR_R_SSL_LIB); return 0; }
+
+    if (v == 1) {
+        unsigned int ct, hv, rsv;
+        if (PACKET_remaining(pkt) != 3  ||
+            !PACKET_get_1(pkt, &ct)     ||
+            !PACKET_get_1(pkt, &hv)     ||
+            !PACKET_get_1(pkt, &rsv)) {
+            SSLfatal(s, SSL_AD_DECODE_ERROR, ERR_R_SSL_LIB);
+            return 0;
+        }
+        
+        s->ssl.hybrid_hint.ext_version = 1;
+        s->ssl.hybrid_hint.hybrid_verify = (unsigned char)(hv ? 1 : 0);
+        s->ssl.hybrid_hint.num_types = 1;
+        s->ssl.hybrid_hint.types[0] = (unsigned char)ct;
+    } else if (v == 2) {
+        unsigned int hv, n, rsv;
+        size_t i;
+        if (PACKET_remaining(pkt) < 2   ||
+            !PACKET_get_1(pkt, &hv)     ||
+            !PACKET_get_1(pkt, &n)      ||
+            n > HYBCERT_MAX             ||
+            PACKET_remaining(pkt) < (size_t)n + 1) {
+            SSLfatal(s, SSL_AD_DECODE_ERROR, ERR_R_SSL_LIB);
+            return 0;
+        }
+
+        s->ssl.hybrid_hint.ext_version = 2;
+        s->ssl.hybrid_hint.hybrid_verify = (unsigned char)(hv ? 1 : 0);
+        s->ssl.hybrid_hint.num_types = (unsigned char)n;
+        for (i = 0; i < n; i++) {
+            unsigned int ct;
+            if (!PACKET_get_1(pkt, &ct) || ct > HYBCERT_CATALYST) {
+                SSLfatal(s, SSL_AD_DECODE_ERROR, ERR_R_SSL_LIB);
+                return 0;
+            }
+            s->ssl.hybrid_hint.types[i] = (unsigned char)ct;
+        }
+        if (!PACKET_get_1(pkt, &rsv) || rsv != 0) {
+            SSLfatal(s, SSL_AD_DECODE_ERROR, ERR_R_SSL_LIB);
+            return 0;
+        }
+    } else {
+        SSLfatal(s, SSL_AD_DECODE_ERROR, ERR_R_SSL_LIB);
+        return 0;
+    }
+
+    s->ssl.hybrid_hint.has_hybrid_cert_hint = 1;
+
+#ifndef OPENSSL_NO_TRACE
+if (OSSL_trace_enabled(TLS)) {
+    BIO *bio = OSSL_TRACE_BEGIN(TLS);
+    if (s->ssl.hybrid_hint.ext_version == 1) {
+        BIO_printf(bio, "hybrid_cert_hint: v=1 ct=%u hv=%u rsv=0\n",
+                    s->ssl.hybrid_hint.types[0],
+                    s->ssl.hybrid_hint.hybridv_verify);
+    } else {
+        size_t i;
+        BIO_printf(bio, "hybrid_cert_hint: v=2 hv=%u n=%u [",
+                    s->ssl.hybrid_hint.hybrid_verify,
+                    s->ssl.hybrid_hint.num_types);
+        for (i = 0; i < s->ssl.hybrid_hint.num_types; i++) {
+            BIO_printf(bio, "%u%s", s->ssl.hybrid_hint.types[i],
+                       (i + 1 == s->ssl.hybrid_hint.num_types) ? "" : " ");
+        }
+        BIO_printf(bio, "] rsv=0\n");
+    }
+    OSSL_TRACE_END(TLS);
+}
+#else
+if (s->ssl.hybrid_hint.ext_version == 1) {
+    fprintf(stderr, "hybrid_cert_hint: v=1 ct=%u hv=%u rsv=0\n",
+            s->ssl.hybrid_hint.types[0],
+            s->ssl.hybrid_hint.hybrid_verify);
+} else {
+    size_t i;
+    fprintf(stderr, "hybrid_cert_hint: v=2 hv=%u n=%u [",
+            s->ssl.hybrid_hint.hybrid_verify,
+            s->ssl.hybrid_hint.num_types);
+    for (i = 0; i < s->ssl.hybrid_hint.num_types; i++) {
+        fprintf(stderr, "%u%s",
+                s->ssl.hybrid_hint.types[i],
+                (i + 1 == s->ssl.hybrid_hint.num_types) ? "" : " ");
+    }
+    fprintf(stderr, "] rsv=0\n");
+}
+#endif    
+    return 1;
+#else
+    return 0;
+#endif
 }
 
 EXT_RETURN tls_construct_stoc_server_name(SSL_CONNECTION *s, WPACKET *pkt,

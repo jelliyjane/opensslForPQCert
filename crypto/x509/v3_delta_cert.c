@@ -52,7 +52,7 @@ X509_ALGOR *copy_sigalg_from_cert(X509 *cert);
 DeltaValidity *copy_validity_from_cert(X509 *cert);
 STACK_OF(X509_EXTENSION) *copy_extensions_except_delta(X509 *cert);
 
-const X509V3_EXT_METHOD v3_delta_cert_desc = {
+const X509V3_EXT_METHOD ossl_v3_delta_cert_desc = {
     NID_id_ce_deltaCertificateDescriptor,
     0,
     ASN1_ITEM_ref(DeltaCertificateDescriptor),
