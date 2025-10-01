@@ -1200,6 +1200,9 @@ int SSL_CTX_set_tlsext_ticket_key_evp_cb
 # define TLS_MD_EXTENDED_MASTER_SECRET_CONST       "\x65\x78\x74\x65\x6e\x64\x65\x64\x20\x6d\x61\x73\x74\x65\x72\x20\x73\x65\x63\x72\x65\x74"
 # define TLS_MD_EXTENDED_MASTER_SECRET_CONST_SIZE  22
 
+# define TLSEXT_TYPE_hybrid_cert_hint 0xFF10
+# define TLSEXT_TYPE_hybrid_cert_select 0xFF11
+
 /* TLS Session Ticket extension struct */
 struct tls_session_ticket_ext_st {
     unsigned short length;

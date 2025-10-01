@@ -131,7 +131,7 @@ static int opt_hybcert_verify = 1;
 static int hybcert_str2code(const char *s, unsigned char *out)
 {
     if (s == NULL || out == NULL) return 0;
-    if (OPENSSL_strcasecmp(s, "dual") == 0)         { *out = HYBCERT_DUAL; return 1; }
+    if (OPENSSL_strcasecmp(s, "dual") == 0)         { *out = HYBCERT_NONE; return 1; }
     if (OPENSSL_strcasecmp(s, "chameleon") == 0)    { *out = HYBCERT_CHAMELEON; return 1; }
     if (OPENSSL_strcasecmp(s, "catalyst") == 0)     { *out = HYBCERT_CATALYST; return 1; }
     return 0;
@@ -2122,8 +2122,7 @@ int s_client_main(int argc, char **argv)
         goto end;
 
     if (opt_hybcert_n > 0) {
-        if (!SSL_set_hybrid_cert_hint_list(con, opt_hybcert_list, opt_hybcert_n,
-                                           opt_hybcert_verify)) {
+        if (!SSL_set_hybrid_cert_hint_list(con, opt_hybcert_list, opt_hybcert_n)) {
             BIO_printf(bio_err, "failed to set hybrid cert hint list\n");
             goto end;
         }

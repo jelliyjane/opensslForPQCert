@@ -328,15 +328,16 @@ typedef int (*SSL_async_callback_fn)(SSL *s, void *arg);
 
 /* Using hybrid certficate in tls*/
 
-# define HYBCERT_DUAL           0
+# define HYBCERT_NONE           0
 # define HYBCERT_CHAMELEON      1
 # define HYBCERT_CATALYST       2
 
 int SSL_set_hybrid_cert_hint_list(SSL *ssl, 
-                                  unsigned char *types, size_t n,
-                                  int hybrid_verify);      
+                                  unsigned char *types, size_t n);      
 
 int SSL_set_hybrid_cert_hint(SSL *ssl, unsigned char cert_type);
+
+int SSL_set_server_hybrid_cert_type(SSL *ssl, unsigned char cert_type);
                                   
 /*
  * SSL/TLS connection options.

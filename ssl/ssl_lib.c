@@ -7858,8 +7858,7 @@ int SSL_CTX_get0_server_cert_type(const SSL_CTX *ctx, unsigned char **t, size_t 
 }
 
 int SSL_set_hybrid_cert_hint_list(SSL *ssl, 
-                                  unsigned char *types, size_t n,
-                                  int hybrid_verify)
+                                  unsigned char *types, size_t n)
 {
     SSL_CONNECTION *sc = SSL_CONNECTION_FROM_SSL(ssl);
     size_t i;
@@ -7868,7 +7867,6 @@ int SSL_set_hybrid_cert_hint_list(SSL *ssl,
     if (n == 0 || n > HYBCERT_MAX) return 0;
 
     sc->ssl.hybrid_hint.ext_version    = 2;
-    sc->ssl.hybrid_hint.hybrid_verify  = hybrid_verify ? 1 : 0;
     sc->ssl.hybrid_hint.num_types      = (unsigned char)n;
     
     for (i = 0; i < n; i++) {
@@ -7876,11 +7874,18 @@ int SSL_set_hybrid_cert_hint_list(SSL *ssl,
         if (ct > HYBCERT_CATALYST) return 0;
         ssl->hybrid_hint.types[i] = ct;
     }
-    ssl->hybrid_hint.has_hybrid_cert_hint = 1;
     return 1;
 }
 
 int SSL_set_hybrid_cert_hint(SSL *ssl, unsigned char cert_type)
 {
-    return SSL_set_hybrid_cert_hint_list(ssl, &cert_type, 1, 1);
+    return SSL_set_hybrid_cert_hint_list(ssl, &cert_type, 1);
+}
+
+int SSL_set_server_hybrid_cert_type(SSL *ssl, unsigned char cert_type)
+{
+    SSL_CONNECTION *sc = SSL_CONNECTION_FROM_SSL(ssl);
+    if (ssl == NULL || sc == NULL) return 0;
+    sc->ssl.hybrid_hint.server_type = cert_type;
+    return 1;
 }

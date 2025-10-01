@@ -1310,102 +1310,123 @@ int tls_parse_ctos_hybrid_cert_hint(SSL_CONNECTION *s, PACKET *pkt,
                                     X509 *x, size_t chainidx)
 {
 #ifndef OPENSSL_NO_TLS1_3
-    unsigned int v;
-    size_t rem = PACKET_remaining(pkt);
+    unsigned int mtype;
+    size_t i;
 
-    if (rem < 4) { SSLfatal(s, SSL_AD_DECODE_ERROR, ERR_R_SSL_LIB); return 0; }
-
-    if (!PACKET_get_1(pkt, &v)) { SSLfatal(s, SSL_AD_DECODE_ERROR, ERR_R_SSL_LIB); return 0; }
-
-    if (v == 1) {
-        unsigned int ct, hv, rsv;
-        if (PACKET_remaining(pkt) != 3  ||
-            !PACKET_get_1(pkt, &ct)     ||
-            !PACKET_get_1(pkt, &hv)     ||
-            !PACKET_get_1(pkt, &rsv)) {
-            SSLfatal(s, SSL_AD_DECODE_ERROR, ERR_R_SSL_LIB);
-            return 0;
-        }
-        
-        s->ssl.hybrid_hint.ext_version = 1;
-        s->ssl.hybrid_hint.hybrid_verify = (unsigned char)(hv ? 1 : 0);
-        s->ssl.hybrid_hint.num_types = 1;
-        s->ssl.hybrid_hint.types[0] = (unsigned char)ct;
-    } else if (v == 2) {
-        unsigned int hv, n, rsv;
-        size_t i;
-        if (PACKET_remaining(pkt) < 2   ||
-            !PACKET_get_1(pkt, &hv)     ||
-            !PACKET_get_1(pkt, &n)      ||
-            n > HYBCERT_MAX             ||
-            PACKET_remaining(pkt) < (size_t)n + 1) {
-            SSLfatal(s, SSL_AD_DECODE_ERROR, ERR_R_SSL_LIB);
-            return 0;
-        }
-
-        s->ssl.hybrid_hint.ext_version = 2;
-        s->ssl.hybrid_hint.hybrid_verify = (unsigned char)(hv ? 1 : 0);
-        s->ssl.hybrid_hint.num_types = (unsigned char)n;
-        for (i = 0; i < n; i++) {
-            unsigned int ct;
-            if (!PACKET_get_1(pkt, &ct) || ct > HYBCERT_CATALYST) {
-                SSLfatal(s, SSL_AD_DECODE_ERROR, ERR_R_SSL_LIB);
-                return 0;
-            }
-            s->ssl.hybrid_hint.types[i] = (unsigned char)ct;
-        }
-        if (!PACKET_get_1(pkt, &rsv) || rsv != 0) {
-            SSLfatal(s, SSL_AD_DECODE_ERROR, ERR_R_SSL_LIB);
-            return 0;
-        }
-    } else {
-        SSLfatal(s, SSL_AD_DECODE_ERROR, ERR_R_SSL_LIB);
-        return 0;
-    }
+    if (!PACKET_get_1(pkt, &mtype)) 
+        goto decode_err;
 
     s->ssl.hybrid_hint.has_hybrid_cert_hint = 1;
+    s->ssl.hybrid_hint.num_types = 0;
+    s->ssl.hybrid_hint.hybrid_verify = 0;
+
+    if (mtype == 0x01) {
+        unsigned int ct, rsv;
+        if (!PACKET_get_1(pkt, &ct) || !PACKET_get_1(pkt, &rsv) || rsv != 0)
+            goto decode_err;
+
+        s->ssl.hybrid_hint.ext_version = 1;
+        s->ssl.hybrid_hint.types[0] = (unsigned char)ct;
+        s->ssl.hybrid_hint.num_types = 1;
+        if (ct == s->ssl.hybrid_hint.server_type)
+            s->ssl.hybrid_hint.hybrid_verify = 1;
+    } else if (mtype == 0x02) {
+        unsigned int n, rsv;
+        size_t i;
+        
+        if (!PACKET_get_1(pkt, &n) || n == 0 || n > HYBCERT_MAX)
+            goto decode_err;
+
+        s->ssl.hybrid_hint.ext_version = 2;
+        s->ssl.hybrid_hint.num_types = (unsigned char)n;
+
+        for (i = 0; i < n; i++) {
+            unsigned int ct;
+            if (!PACKET_get_1(pkt, &ct)) goto decode_err;
+            s->ssl.hybrid_hint.types[i] = (unsigned char)ct;
+            if (ct == s->ssl.hybrid_hint.server_type)
+                s->ssl.hybrid_hint.hybrid_verify = 1;
+        }
+
+        if (!PACKET_get_1(pkt, &rsv) || rsv != 0) 
+            goto decode_err;
+    } else {
+        goto decode_err;
+    }
 
 #ifndef OPENSSL_NO_TRACE
 if (OSSL_trace_enabled(TLS)) {
     BIO *bio = OSSL_TRACE_BEGIN(TLS);
-    if (s->ssl.hybrid_hint.ext_version == 1) {
-        BIO_printf(bio, "hybrid_cert_hint: v=1 ct=%u hv=%u rsv=0\n",
-                    s->ssl.hybrid_hint.types[0],
-                    s->ssl.hybrid_hint.hybridv_verify);
-    } else {
-        size_t i;
-        BIO_printf(bio, "hybrid_cert_hint: v=2 hv=%u n=%u [",
-                    s->ssl.hybrid_hint.hybrid_verify,
-                    s->ssl.hybrid_hint.num_types);
-        for (i = 0; i < s->ssl.hybrid_hint.num_types; i++) {
-            BIO_printf(bio, "%u%s", s->ssl.hybrid_hint.types[i],
-                       (i + 1 == s->ssl.hybrid_hint.num_types) ? "" : " ");
-        }
-        BIO_printf(bio, "] rsv=0\n");
+    BIO_printf(bio, "hybrid_cert_hint (ClientHello): v=%u n=%u [",
+               s->ssl.hybrid_hint.ext_version,
+               s->ssl.hybrid_hint.num_types);
+    for (size_t i = 0; i < s->ssl.hybrid_hint.num_types; i++) {
+        unsigned char ct = s->ssl.hybrid_hint.types[i];
+        BIO_printf(bio, "%s%s",
+                   HYBCERT_TYPE_NAME(ct),
+                   (i + 1 == s->ssl.hybrid_hint.num_types) ? "" : " ");
     }
+    BIO_printf(bio, "] server_type=%s\n", HYBCERT_TYPE_NAME(s->ssl.hybrid_hint.server_type));
     OSSL_TRACE_END(TLS);
 }
 #else
-if (s->ssl.hybrid_hint.ext_version == 1) {
-    fprintf(stderr, "hybrid_cert_hint: v=1 ct=%u hv=%u rsv=0\n",
-            s->ssl.hybrid_hint.types[0],
-            s->ssl.hybrid_hint.hybrid_verify);
-} else {
-    size_t i;
-    fprintf(stderr, "hybrid_cert_hint: v=2 hv=%u n=%u [",
-            s->ssl.hybrid_hint.hybrid_verify,
-            s->ssl.hybrid_hint.num_types);
-    for (i = 0; i < s->ssl.hybrid_hint.num_types; i++) {
-        fprintf(stderr, "%u%s",
-                s->ssl.hybrid_hint.types[i],
+fprintf(stderr, "hybrid_cert_hint (ClientHello): v=%u n=%u [",
+        s->ssl.hybrid_hint.ext_version,
+        s->ssl.hybrid_hint.num_types);
+for (size_t i = 0; i < s->ssl.hybrid_hint.num_types; i++) {
+    unsigned char ct = s->ssl.hybrid_hint.types[i];
+    fprintf(stderr, "%s%s",
+                HYBCERT_TYPE_NAME(ct),
                 (i + 1 == s->ssl.hybrid_hint.num_types) ? "" : " ");
-    }
-    fprintf(stderr, "] rsv=0\n");
 }
-#endif    
+fprintf(stderr, "] server_type=%s\n", HYBCERT_TYPE_NAME(s->ssl.hybrid_hint.server_type));
+#endif
     return 1;
+
+decode_err:
+    SSLfatal(s, SSL_AD_DECODE_ERROR, ERR_R_SSL_LIB);
+    return 0;
 #else
     return 0;
+#endif
+}
+
+EXT_RETURN tls_construct_stoc_hybrid_cert_hint(SSL_CONNECTION *s,
+                                                 WPACKET *pkt,  unsigned int context,
+                                                 X509 *x, size_t chainidx)
+{
+#ifndef OPENSSL_NO_TLS1_3
+    if (!s->ssl.hybrid_hint.hybrid_verify)
+        return EXT_RETURN_NOT_SENT;
+
+    if (!WPACKET_put_bytes_u16(pkt, TLSEXT_TYPE_hybrid_cert_hint) ||
+        !WPACKET_start_sub_packet_u16(pkt))
+        return EXT_RETURN_FAIL;
+
+    if (!WPACKET_put_bytes_u8(pkt, 0x10) ||
+        !WPACKET_put_bytes_u8(pkt, s->ssl.hybrid_hint.server_type) ||
+        !WPACKET_put_bytes_u8(pkt, 0x00) ||
+        !WPACKET_close(pkt))
+        return EXT_RETURN_FAIL;
+
+#ifndef OPENSSL_NO_TRACE
+if (OSSL_trace_enabled(TLS)) {
+    BIO *bio = OSSL_TRACE_BEGIN(TLS);
+    BIO_printf(bio,
+        "hybrid_cert_select (ServerHello): selected_type=%s\n",
+        HYBCERT_TYPE_NAME(s->ssl.hybrid_hint.server_type));
+    OSSL_TRACE_END(TLS);
+}
+#else
+fprintf(stderr,
+    "hybrid_cert_select (ServerHello): selected_type=%s\n",
+    HYBCERT_TYPE_NAME(s->ssl.hybrid_hint.server_type));
+#endif
+
+    return EXT_RETURN_SENT;
+
+#else
+    return EXT_RETURN_FAIL;
 #endif
 }
 

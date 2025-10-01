@@ -1203,8 +1203,17 @@ typedef struct cert_pkey_st CERT_PKEY;
 #define SSL_TYPE_QUIC_XSO        2
 
 /* Using hybrid certficate in tls*/
-# define TLSEXT_TYPE_hybrid_cert_hint 0xFF10
+// # define TLSEXT_TYPE_hybrid_cert_hint 0xFF10
+// # define TLSEXT_TYPE_hybrid_cert_select 0xFF11
 # define HYBCERT_MAX 3
+
+static const char *hybcert_type_name[] = {
+    "none",
+    "chameleon",
+    "catalyst"
+};
+
+# define HYBCERT_TYPE_NAME(id) ((id) < OSSL_NELEM(hybcert_type_name) ? hybcert_type_name[(id)] : "unknwon")
 
 /* Hybrid certificate status field*/
 typedef struct {
@@ -1213,6 +1222,8 @@ typedef struct {
     unsigned char hybrid_verify;
     unsigned char num_types;
     unsigned char types[HYBCERT_MAX];
+    unsigned char server_type;
+    unsigned char selected_type;
 } HYBRID_CERT_HINT;
 
 struct ssl_st {

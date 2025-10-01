@@ -123,6 +123,8 @@ char *psk_key = NULL;           /* by default PSK is not used */
 
 static char http_server_binmode = 0; /* for now: 0/1 = default/binary */
 
+static int s_hybcert_type = HYBCERT_NONE;
+
 #ifndef OPENSSL_NO_PSK
 static unsigned int psk_server_cb(SSL *ssl, const char *identity,
                                   unsigned char *psk,
@@ -734,7 +736,7 @@ typedef enum OPTION_choice {
     OPT_ID_PREFIX, OPT_SERVERNAME, OPT_SERVERNAME_FATAL,
     OPT_CERT2, OPT_KEY2, OPT_NEXTPROTONEG, OPT_ALPN, OPT_SENDFILE,
     OPT_SRTP_PROFILES, OPT_KEYMATEXPORT, OPT_KEYMATEXPORTLEN,
-    OPT_KEYLOG_FILE, OPT_MAX_EARLY, OPT_RECV_MAX_EARLY, OPT_EARLY_DATA,
+    OPT_KEYLOG_FILE, OPT_MAX_EARLY, OPT_RECV_MAX_EARLY, OPT_EARLY_DATA, OPT_HYBCERT, OPT_HYBKEY,
     OPT_S_NUM_TICKETS, OPT_ANTI_REPLAY, OPT_NO_ANTI_REPLAY, OPT_SCTP_LABEL_BUG,
     OPT_HTTP_SERVER_BINMODE, OPT_NOCANAMES, OPT_IGNORE_UNEXPECTED_EOF, OPT_KTLS,
     OPT_USE_ZC_SENDFILE,
@@ -867,6 +869,8 @@ const OPTIONS s_server_options[] = {
      "No verify output except verify errors"},
     {"ign_eof", OPT_IGN_EOF, '-', "Ignore input EOF (default when -quiet)"},
     {"no_ign_eof", OPT_NO_IGN_EOF, '-', "Do not ignore input EOF"},
+    {"hybcert", OPT_HYBCERT, 's', "Hybrid cert types: dual|chameleon|catalyst"},
+    {"hybkey", OPT_HYBKEY, 's', "Second private key file for hybrid certificate signing"},
 #ifndef OPENSSL_NO_COMP_ALG
     {"cert_comp", OPT_CERT_COMP, '-', "Pre-compress server certificates"},
 #endif
@@ -1043,6 +1047,7 @@ int s_server_main(int argc, char *argv[])
     unsigned char *context = NULL;
     OPTION_CHOICE o;
     EVP_PKEY *s_key2 = NULL;
+    EVP_PKEY *s_hybkey = NULL;
     X509 *s_cert2 = NULL;
     tlsextctx tlsextcbp = { NULL, NULL, SSL_TLSEXT_ERR_ALERT_WARNING };
     const char *ssl_config = NULL;
@@ -1070,6 +1075,7 @@ int s_server_main(int argc, char *argv[])
     int s_server_session_id_context = 1; /* anything will do */
     const char *s_cert_file = TEST_CERT, *s_key_file = NULL, *s_chain_file = NULL;
     const char *s_cert_file2 = TEST_CERT2, *s_key_file2 = NULL;
+    const char *s_hybkey_file = NULL;
     char *s_dcert_file = NULL, *s_dkey_file = NULL, *s_dchain_file = NULL;
 #ifndef OPENSSL_NO_OCSP
     int s_tlsextstatus = 0;
@@ -1704,6 +1710,16 @@ int s_server_main(int argc, char *argv[])
         case OPT_ENABLE_CLIENT_RPK:
             enable_client_rpk = 1;
             break;
+        case OPT_HYBCERT:
+            char *arg = opt_arg();
+            if(OPENSSL_strcasecmp(arg, "chameleon") == 0)
+                s_hybcert_type = HYBCERT_CHAMELEON;
+            else if(OPENSSL_strcasecmp(arg, "catalyst") == 0)
+                s_hybcert_type = HYBCERT_CATALYST;
+            break;
+        case OPT_HYBKEY:
+            s_hybkey_file = opt_arg();
+            break;
         }
     }
 
@@ -1829,6 +1845,13 @@ int s_server_main(int argc, char *argv[])
                                 "second server certificate");
 
             if (s_cert2 == NULL)
+                goto end;
+        }
+
+        if (s_hybkey_file != NULL) {
+            s_hybkey = load_key(s_hybkey_file, s_key_format, 0, pass, engine,
+                                "server hybrid certificate private key");
+            if (s_hybkey = NULL)
                 goto end;
         }
     }
@@ -2462,6 +2485,13 @@ static int sv_body(int s, int stype, int prot, unsigned char *context)
     if (con == NULL) {
         ret = -1;
         goto err;
+    }
+
+    if (s_hybcert_type != HYBCERT_NONE) {
+        if(!SSL_set_server_hybrid_cert_type(con, (unsigned char)s_hybcert_type)) {
+            BIO_printf(bio_err, "failed to set hybrid cert hint\n");
+            goto err;
+        }
     }
 
     if (s_tlsextdebug) {
@@ -3191,6 +3221,13 @@ static int www_body(int s, int stype, int prot, unsigned char *context)
 
     if ((con = SSL_new(ctx)) == NULL)
         goto err;
+
+    if (s_hybcert_type != HYBCERT_NONE) {
+        if(!SSL_set_server_hybrid_cert_type(con, (unsigned char)s_hybcert_type)) {
+            BIO_printf(bio_err, "failed to set hybrid cert hint\n");
+            goto err;
+        }
+    }
 
     if (s_tlsextdebug) {
         SSL_set_tlsext_debug_callback(con, tlsext_cb);
