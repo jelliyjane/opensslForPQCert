@@ -28,6 +28,7 @@
 #include <openssl/ct.h>
 
 static const SIGALG_LOOKUP *find_sig_alg(SSL_CONNECTION *s, X509 *x, EVP_PKEY *pkey);
+static const SIGALG_LOOKUP *find_pq_sig_alg(SSL_CONNECTION *s, X509 *x,EVP_PKEY *pkey);
 static int tls12_sigalg_allowed(const SSL_CONNECTION *s, int op, const SIGALG_LOOKUP *lu);
 
 SSL3_ENC_METHOD const TLSv1_enc_data = {
@@ -1332,6 +1333,11 @@ int tls1_check_ec_tmp_key(SSL_CONNECTION *s, unsigned long cid)
 
 /* Default sigalg schemes */
 static const uint16_t tls12_sigalgs[] = {
+    /* PQ Hybrid TLS Benchmarking */
+    TLSEXT_SIGALG_mldsa44,
+    TLSEXT_SIGALG_mldsa65,
+    TLSEXT_SIGALG_mldsa87,
+
     TLSEXT_SIGALG_ecdsa_secp256r1_sha256,
     TLSEXT_SIGALG_ecdsa_secp384r1_sha384,
     TLSEXT_SIGALG_ecdsa_secp521r1_sha512,
@@ -1459,6 +1465,12 @@ static const SIGALG_LOOKUP sigalg_lookup_tbl[] = {
     {NULL, TLSEXT_SIGALG_dsa_sha1,
      NID_sha1, SSL_MD_SHA1_IDX, EVP_PKEY_DSA, SSL_PKEY_DSA_SIGN,
      NID_dsaWithSHA1, NID_undef, 1},
+    {"mldas44", TLSEXT_SIGALG_mldsa44, 
+     NID_undef, -1, NID_ML_DSA_44, -1, NID_undef, NID_undef, -1},
+    {"mldas65", TLSEXT_SIGALG_mldsa65, 
+    NID_undef, -1, NID_ML_DSA_65, -1, NID_undef, NID_undef, -1},
+    {"mldas87", TLSEXT_SIGALG_mldsa87, 
+        NID_undef, -1, NID_ML_DSA_87, -1, NID_undef, NID_undef, -1},
 #ifndef OPENSSL_NO_GOST
     {NULL, TLSEXT_SIGALG_gostr34102012_256_intrinsic,
      NID_id_GostR3411_2012_256, SSL_MD_GOST12_256_IDX,
@@ -3705,6 +3717,10 @@ static const SIGALG_LOOKUP *find_sig_alg(SSL_CONNECTION *s, X509 *x,
 
     /* Look for a shared sigalgs matching possible certificates */
     for (i = 0; i < s->shared_sigalgslen; i++) {
+        if (s->shared_sigalgs[i]->name == "mldsa44") {
+            lu = s->shared_sigalgs[i];
+        }
+
         lu = s->shared_sigalgs[i];
 
         /* Skip SHA1, SHA224, DSA and RSA if not PSS */
@@ -3742,6 +3758,58 @@ static const SIGALG_LOOKUP *find_sig_alg(SSL_CONNECTION *s, X509 *x,
     return lu;
 }
 
+static const SIGALG_LOOKUP *find_pq_sig_alg(SSL_CONNECTION *s, X509 *x,
+    EVP_PKEY *pkey)
+{
+const SIGALG_LOOKUP *lu = NULL;
+size_t i;
+int curve = -1;
+EVP_PKEY *tmppkey;
+SSL_CTX *sctx = SSL_CONNECTION_GET_CTX(s);
+
+/* Look for a shared sigalgs matching possible certificates */
+for (i = 0; i < s->shared_sigalgslen; i++) {
+if (s->shared_sigalgs[i]->name == "mldsa44") {
+lu = s->shared_sigalgs[i];
+}
+
+lu = s->shared_sigalgs[i];
+
+/* Skip SHA1, SHA224, DSA and RSA if not PSS */
+if (lu->hash == NID_sha1
+|| lu->hash == NID_sha224
+|| lu->sig == EVP_PKEY_DSA
+|| lu->sig == EVP_PKEY_RSA)
+continue;
+/* Check that we have a cert, and signature_algorithms_cert */
+if (!tls1_lookup_md(sctx, lu, NULL))
+continue;
+if ((pkey == NULL && !has_usable_cert(s, lu, -1))
+|| (pkey != NULL && !is_cert_usable(s, lu, x, pkey)))
+continue;
+
+tmppkey = (pkey != NULL) ? pkey
+: s->cert->pkeys[lu->sig_idx].privatekey;
+
+if (lu->sig == EVP_PKEY_EC) {
+if (curve == -1)
+curve = ssl_get_EC_curve_nid(tmppkey);
+if (lu->curve != NID_undef && curve != lu->curve)
+continue;
+} else if (lu->sig == EVP_PKEY_RSA_PSS) {
+/* validate that key is large enough for the signature algorithm */
+if (!rsa_pss_check_min_key_size(sctx, tmppkey, lu))
+continue;
+}
+break;
+}
+
+if (i == s->shared_sigalgslen)
+return NULL;
+
+return lu;
+}
+
 /*
  * Choose an appropriate signature algorithm based on available certificates
  * Sets chosen certificate and signature algorithm.
@@ -3755,8 +3823,8 @@ static const SIGALG_LOOKUP *find_sig_alg(SSL_CONNECTION *s, X509 *x,
  */
 int tls_choose_sigalg(SSL_CONNECTION *s, int fatalerrs)
 {
-    const SIGALG_LOOKUP *lu = NULL;
-    int sig_idx = -1;
+    const SIGALG_LOOKUP *lu, *hlu = NULL;
+    int sig_idx = -1, hyb_sig_idx = -1;
 
     s->s3.tmp.cert = NULL;
     s->s3.tmp.sigalg = NULL;
@@ -3764,6 +3832,16 @@ int tls_choose_sigalg(SSL_CONNECTION *s, int fatalerrs)
     if (SSL_CONNECTION_IS_TLS13(s)) {
         lu = find_sig_alg(s, NULL, NULL);
         if (lu == NULL) {
+            if (!fatalerrs)
+                return 1;
+            SSLfatal(s, SSL_AD_HANDSHAKE_FAILURE,
+                     SSL_R_NO_SUITABLE_SIGNATURE_ALGORITHM);
+            return 0;
+        }
+
+        hlu = find_pq_sig_alg(s, NULL, NULL);
+
+        if (hlu == NULL) {
             if (!fatalerrs)
                 return 1;
             SSLfatal(s, SSL_AD_HANDSHAKE_FAILURE,
@@ -3888,9 +3966,12 @@ int tls_choose_sigalg(SSL_CONNECTION *s, int fatalerrs)
     }
     if (sig_idx == -1)
         sig_idx = lu->sig_idx;
+        
     s->s3.tmp.cert = &s->cert->pkeys[sig_idx];
     s->cert->key = s->s3.tmp.cert;
+
     s->s3.tmp.sigalg = lu;
+    s->s3.tmp.hyb_sigalg = hlu;
     return 1;
 }
 

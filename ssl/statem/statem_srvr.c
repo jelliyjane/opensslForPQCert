@@ -542,6 +542,14 @@ static WRITE_TRAN ossl_statem_server13_write_transition(SSL_CONNECTION *s)
         return WRITE_TRAN_CONTINUE;
 
     case TLS_ST_SW_CERT_VRFY:
+        /* PQ Hybrid TLS Benchmarking */
+        if (s->ssl.hybrid_hint.hybrid_verify && s->s3.tmp.cert && s->hyb_pkey != NULL)
+            st->hand_state = TLS_ST_SW_PQCERT_VRFY;
+        else
+            st->hand_state = TLS_ST_SW_FINISHED;
+        return WRITE_TRAN_CONTINUE;
+
+    case TLS_ST_SW_PQCERT_VRFY:
         st->hand_state = TLS_ST_SW_FINISHED;
         return WRITE_TRAN_CONTINUE;
 
@@ -1139,6 +1147,11 @@ int ossl_statem_server_construct_message(SSL_CONNECTION *s,
         *mt = SSL3_MT_CERTIFICATE_VERIFY;
         break;
 
+    /* PQ Hybrid TLS Benchmarking */
+    case TLS_ST_SW_PQCERT_VRFY:
+        *confunc = tls_construct_pq_cert_verify;
+        *mt = SSL3_MT_PQ_CERTIFICATE_VERIFY;
+        break;
 
     case TLS_ST_SW_KEY_EXCH:
         *confunc = tls_construct_server_key_exchange;

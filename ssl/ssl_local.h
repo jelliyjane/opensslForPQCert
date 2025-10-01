@@ -1202,6 +1202,30 @@ typedef struct cert_pkey_st CERT_PKEY;
 #define SSL_TYPE_QUIC_CONNECTION 1
 #define SSL_TYPE_QUIC_XSO        2
 
+/* Using hybrid certficate in tls*/
+// # define TLSEXT_TYPE_hybrid_cert_hint 0xFF10
+// # define TLSEXT_TYPE_hybrid_cert_select 0xFF11
+# define HYBCERT_MAX 3
+
+static const char *hybcert_type_name[] = {
+    "none",
+    "chameleon",
+    "catalyst"
+};
+
+# define HYBCERT_TYPE_NAME(id) ((id) < OSSL_NELEM(hybcert_type_name) ? hybcert_type_name[(id)] : "unknwon")
+
+/* Hybrid certificate status field*/
+typedef struct {
+    unsigned int has_hybrid_cert_hint:1;
+    unsigned char ext_version;
+    unsigned char hybrid_verify;
+    unsigned char num_types;
+    unsigned char types[HYBCERT_MAX];
+    unsigned char server_type;
+    unsigned char selected_type;
+} HYBRID_CERT_HINT;
+
 struct ssl_st {
     int type;
     SSL_CTX *ctx;
@@ -1211,6 +1235,7 @@ struct ssl_st {
     CRYPTO_RWLOCK *lock;
     /* extra application data */
     CRYPTO_EX_DATA ex_data;
+    HYBRID_CERT_HINT hybrid_hint;
 };
 
 struct ssl_connection_st {
@@ -1278,6 +1303,9 @@ struct ssl_connection_st {
     size_t init_off;               /* amount read/written */
 
     size_t ssl_pkey_num;
+
+    /* PQ Hybrid TLS Benchmarking */
+    EVP_PKEY *hyb_pkey;
 
     struct {
         long flags;
@@ -1357,6 +1385,10 @@ struct ssl_connection_st {
 # endif
             /* Signature algorithm we actually use */
             const struct sigalg_lookup_st *sigalg;
+
+            /* PQ Hybrid TLS Benchmarking */
+            const struct sigalg_lookup_st *hyb_sigalg;
+
             /* Pointer to certificate we use */
             CERT_PKEY *cert;
             /*
@@ -2224,6 +2256,15 @@ typedef enum downgrade_en {
 #define TLSEXT_SIGALG_ecdsa_brainpoolP256r1_sha256              0x081a
 #define TLSEXT_SIGALG_ecdsa_brainpoolP384r1_sha384              0x081b
 #define TLSEXT_SIGALG_ecdsa_brainpoolP512r1_sha512              0x081c
+
+/* PQ Hybrid TLS Benchmarking */
+#define TLSEXT_SIGALG_mldsa44                                   0x0904
+#define TLSEXT_SIGALG_mldsa65                                   0x0905
+#define TLSEXT_SIGALG_mldsa87                                   0x0906
+
+#define TLSEXT_SIGALG_mldsa44_name                              "mldsa44"
+#define TLSEXT_SIGALG_mldsa65_name                              "mldsa65"
+#define TLSEXT_SIGALG_mldsa87_name                              "mldsa87"
 
 /* Known PSK key exchange modes */
 #define TLSEXT_KEX_MODE_KE                                      0x00

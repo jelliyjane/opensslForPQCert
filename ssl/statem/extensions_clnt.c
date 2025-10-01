@@ -12,6 +12,11 @@
 #include "internal/cryptlib.h"
 #include "statem_local.h"
 
+#include "internal/ssl.h"
+#include "internal/packet.h"
+#include <openssl/tls1.h>
+#include <openssl/ssl.h>
+
 EXT_RETURN tls_construct_ctos_renegotiate(SSL_CONNECTION *s, WPACKET *pkt,
                                           unsigned int context, X509 *x,
                                           size_t chainidx)
@@ -1213,6 +1218,91 @@ EXT_RETURN tls_construct_ctos_post_handshake_auth(SSL_CONNECTION *s, WPACKET *pk
 #endif
 }
 
+EXT_RETURN tls_construct_ctos_hybrid_cert_hint(SSL_CONNECTION *s, WPACKET *pkt,
+                                               unsigned int context,
+                                               X509 *x, size_t chainidx)
+{
+#ifndef OPENSSL_NO_TLS1_3
+    unsigned char n = s->ssl.hybrid_hint.num_types;
+    if (n == 0 || n > HYBCERT_MAX)
+        return EXT_RETURN_NOT_SENT;
+
+    if (!WPACKET_put_bytes_u16(pkt, TLSEXT_TYPE_hybrid_cert_hint) ||
+        !WPACKET_start_sub_packet_u16(pkt))
+        goto err;
+
+    if (n == 1) {
+        if (!WPACKET_put_bytes_u8(pkt, 0x01)    // Message type = hint_v1
+        || !WPACKET_put_bytes_u8(pkt, s->ssl.hybrid_hint.types[0])
+        || !WPACKET_put_bytes_u8(pkt, 0x00))    // rsv
+        goto err;
+    } else {
+        size_t i;
+        if (!WPACKET_put_bytes_u8(pkt, 0x02)   ||   // Message type = hint_v2
+            !WPACKET_put_bytes_u8(pkt, n))
+            goto err;
+        
+        for (i = 0; i < n; i++) {
+            if (!WPACKET_put_bytes_u8(pkt, s->ssl.hybrid_hint.types[i]))
+                goto err;
+        }
+        if (!WPACKET_put_bytes_u8(pkt, 0x00))   // rsv
+            goto err;
+    }
+        
+    if (!WPACKET_close(pkt))
+        goto err;
+
+    return EXT_RETURN_SENT;
+
+err:
+    SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
+    return EXT_RETURN_FAIL;
+#else
+    return EXT_RETURN_NOT_SENT;
+#endif
+}
+
+int tls_parse_stoc_hybrid_cert_hint(SSL_CONNECTION *s, PACKET *pkt,
+                                    unsigned int context, X509 *x, size_t chaintidx)
+{
+#ifndef OPENSSL_NO_TLS1_3
+    unsigned int mtype, sel, rsv;
+
+    if (!PACKET_get_1(pkt, &mtype))
+        goto decode_err;
+    if (mtype != 0x10)
+        goto decode_err;
+
+    if  (!PACKET_get_1(pkt, &sel) || !PACKET_get_1(pkt, &rsv) || rsv != 0) 
+        goto decode_err;
+        
+    s->ssl.hybrid_hint.selected_type = (unsigned char)sel;
+
+#ifndef OPENSSL_NO_TRACE
+    if (OSSL_trace_enabled(TLS)) {
+        BIO *bio = OSSL_TRACE_BEGIN(TLS);
+        BIO_printf(bio,
+                    "hybrid_cert_select (ServerHello): received_type=%s\n",
+                    HYBCERT_TYPE_NAME(s->ssl.hybrid_hint.selected_type));
+        OSSL_TRACE_END(TLS);
+    }
+#else
+    fprintf(stderr,
+        "hybrid_cert_select (ServerHello): received_type=%s\n",
+        HYBCERT_TYPE_NAME(s->ssl.hybrid_hint.selected_type));
+#endif
+
+    return 1;
+
+decode_err:
+    SSLfatal(s, SSL_AD_DECODE_ERROR, ERR_R_SSL_LIB);
+    return 0;
+    
+#else
+    return 0;
+#endif
+}
 
 /*
  * Parse the server's renegotiation binding and abort if it's not right

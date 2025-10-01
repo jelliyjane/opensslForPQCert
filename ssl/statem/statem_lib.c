@@ -432,6 +432,132 @@ CON_FUNC_RETURN tls_construct_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
     return CON_FUNC_ERROR;
 }
 
+/* PQ Hybrid TLS Benchmarking */
+CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
+{
+    EVP_PKEY *pkey = NULL;
+    const EVP_MD *md = NULL;
+    EVP_MD_CTX *mctx = NULL;
+    EVP_PKEY_CTX *pctx = NULL;
+    size_t hdatalen = 0, siglen = 0;
+    void *hdata;
+    unsigned char *sig = NULL;
+    unsigned char tls13tbs[TLS13_TBS_PREAMBLE_SIZE + EVP_MAX_MD_SIZE];
+    const SIGALG_LOOKUP *lu = s->s3.tmp.hyb_sigalg;
+    SSL_CTX *sctx = SSL_CONNECTION_GET_CTX(s);
+
+    if (lu == NULL || s->s3.tmp.cert == NULL || s->hyb_pkey == NULL) {
+        SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
+        goto err;
+    }
+    pkey = s->hyb_pkey;
+
+    if (pkey == NULL || !tls1_lookup_md(sctx, lu, &md)) {
+        SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
+        goto err;
+    }
+
+    mctx = EVP_MD_CTX_new();
+    if (mctx == NULL) {
+        SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_EVP_LIB);
+        goto err;
+    }
+
+    /* Get the data to be signed */
+    if (!get_cert_verify_tbs_data(s, tls13tbs, &hdata, &hdatalen)) {
+        /* SSLfatal() already called */
+        goto err;
+    }
+
+    if (SSL_USE_SIGALGS(s) && !WPACKET_put_bytes_u16(pkt, lu->sigalg)) {
+        SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
+        goto err;
+    }
+
+    if (EVP_DigestSignInit_ex(mctx, &pctx,
+                              md == NULL ? NULL : EVP_MD_get0_name(md),
+                              sctx->libctx, sctx->propq, pkey,
+                              NULL) <= 0) {
+        SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_EVP_LIB);
+        goto err;
+    }
+
+    if (lu->sig == EVP_PKEY_RSA_PSS) {
+        if (EVP_PKEY_CTX_set_rsa_padding(pctx, RSA_PKCS1_PSS_PADDING) <= 0
+            || EVP_PKEY_CTX_set_rsa_pss_saltlen(pctx,
+                                                RSA_PSS_SALTLEN_DIGEST) <= 0) {
+            SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_EVP_LIB);
+            goto err;
+        }
+    }
+    if (s->version == SSL3_VERSION) {
+        /*
+         * Here we use EVP_DigestSignUpdate followed by EVP_DigestSignFinal
+         * in order to add the EVP_CTRL_SSL3_MASTER_SECRET call between them.
+         */
+        if (EVP_DigestSignUpdate(mctx, hdata, hdatalen) <= 0
+            || EVP_MD_CTX_ctrl(mctx, EVP_CTRL_SSL3_MASTER_SECRET,
+                               (int)s->session->master_key_length,
+                               s->session->master_key) <= 0
+            || EVP_DigestSignFinal(mctx, NULL, &siglen) <= 0) {
+
+            SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_EVP_LIB);
+            goto err;
+        }
+        sig = OPENSSL_malloc(siglen);
+        if (sig == NULL
+                || EVP_DigestSignFinal(mctx, sig, &siglen) <= 0) {
+            SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_EVP_LIB);
+            goto err;
+        }
+    } else {
+        /*
+         * Here we *must* use EVP_DigestSign() because Ed25519/Ed448 does not
+         * support streaming via EVP_DigestSignUpdate/EVP_DigestSignFinal
+         */
+        if (EVP_DigestSign(mctx, NULL, &siglen, hdata, hdatalen) <= 0) {
+            SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_EVP_LIB);
+            goto err;
+        }
+        sig = OPENSSL_malloc(siglen);
+        if (sig == NULL
+                || EVP_DigestSign(mctx, sig, &siglen, hdata, hdatalen) <= 0) {
+            SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_EVP_LIB);
+            goto err;
+        }
+    }
+
+#ifndef OPENSSL_NO_GOST
+    {
+        int pktype = lu->sig;
+
+        if (pktype == NID_id_GostR3410_2001
+            || pktype == NID_id_GostR3410_2012_256
+            || pktype == NID_id_GostR3410_2012_512)
+            BUF_reverse(sig, NULL, siglen);
+    }
+#endif
+
+    if (!WPACKET_sub_memcpy_u16(pkt, sig, siglen)) {
+        SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
+        goto err;
+    }
+
+    /* Digest cached records and discard handshake buffer */
+    if (!ssl3_digest_cached_records(s, 0)) {
+        /* SSLfatal() already called */
+        goto err;
+    }
+
+    OPENSSL_free(sig);
+    EVP_MD_CTX_free(mctx);
+    return CON_FUNC_SUCCESS;
+ err:
+    OPENSSL_free(sig);
+    EVP_MD_CTX_free(mctx);
+    return CON_FUNC_ERROR;
+}
+
 MSG_PROCESS_RETURN tls_process_cert_verify(SSL_CONNECTION *s, PACKET *pkt)
 {
     EVP_PKEY *pkey = NULL;
@@ -604,6 +730,56 @@ MSG_PROCESS_RETURN tls_process_cert_verify(SSL_CONNECTION *s, PACKET *pkt)
     OPENSSL_free(gost_data);
 #endif
     return ret;
+}
+
+/* statem_clnt.c (또는 네가 클라 핸드셰이크 파서를 두는 곳) */
+int tls_process_pq_cert_verify_minimal(SSL_CONNECTION *s, PACKET *pkt)
+{
+#ifndef OPENSSL_NO_TLS1_3
+    unsigned int scheme = 0;
+    PACKET sig = {0};
+
+    /* TLS 1.3에서만 사용 (원하면 이 체크는 빼도 됨) */
+    if (!SSL_CONNECTION_IS_TLS13(s)) {
+        SSLfatal(s, SSL_AD_UNEXPECTED_MESSAGE, SSL_R_UNEXPECTED_MESSAGE);
+        return 0;
+    }
+
+    /* 형식: 2바이트 scheme, 2바이트 길이, 서명 바이트 */
+    if (!PACKET_get_net_2(pkt, &scheme)
+        || !PACKET_get_length_prefixed_2(pkt, &sig)) {
+        SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_BAD_PACKET);
+        return 0;
+    }
+
+    // /* 여기서는 검증하지 않는다. 그냥 본 사실만 기록 */
+    // s->s3.tmp.pqcv_seen = 1;                 /* “봤다” 플래그 */
+    // s->s3.tmp.pqcv_scheme = (uint16_t)scheme;/* 코드포인트 저장(디버그용) */
+    // s->s3.tmp.pqcv_len = PACKET_remaining(&sig);
+
+#ifndef OPENSSL_NO_TRACE
+    if (OSSL_trace_enabled(TLS)) {
+        BIO *bio = OSSL_TRACE_BEGIN(TLS);
+        BIO_printf(bio, "PQ CertVerify(minimal): scheme=0x%04x, siglen=%zu\n",
+                   scheme, (size_t)PACKET_remaining(&sig));
+        OSSL_TRACE_END(TLS);
+    }
+#endif
+
+    /* sig 바이트를 복사해서 디버깅용으로 보관하고 싶다면(선택): */
+#if 0
+    OPENSSL_free(s->s3.tmp.pqcv_sig_copy);
+    s->s3.tmp.pqcv_sig_copy = OPENSSL_memdup(PACKET_data(&sig),
+                                             PACKET_remaining(&sig));
+    s->s3.tmp.pqcv_sig_copy_len = s->s3.tmp.pqcv_sig_copy
+                                  ? PACKET_remaining(&sig) : 0;
+#endif
+
+    return 1;
+#else
+    SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_UNSUPPORTED);
+    return 0;
+#endif
 }
 
 CON_FUNC_RETURN tls_construct_finished(SSL_CONNECTION *s, WPACKET *pkt)

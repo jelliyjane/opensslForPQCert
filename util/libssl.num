@@ -583,3 +583,7 @@ SSL_set_value_uint                      583	3_3_0	EXIST::FUNCTION:
 SSL_poll                                584	3_3_0	EXIST::FUNCTION:
 SSL_SESSION_get_time_ex                 585	3_3_0	EXIST::FUNCTION:
 SSL_SESSION_set_time_ex                 586	3_3_0	EXIST::FUNCTION:
+SSL_set_hybrid_cert_hint                587	3_3_0	EXIST::FUNCTION:
+SSL_set_hybrid_cert_hint_list           588	3_3_0	EXIST::FUNCTION:
+SSL_set_server_hybrid_cert_type         589	3_3_0	EXIST::FUNCTION:
+SSL_set_hybrid_private_key              590	3_3_0	EXIST::FUNCTION:

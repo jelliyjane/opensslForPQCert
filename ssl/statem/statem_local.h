@@ -93,6 +93,7 @@ MSG_PROCESS_RETURN ossl_statem_client_process_message(SSL_CONNECTION *s,
 WORK_STATE ossl_statem_client_post_process_message(SSL_CONNECTION *s,
                                                    WORK_STATE wst);
 
+
 /*
  * TLS/DTLS server state machine functions
  */
@@ -155,6 +156,8 @@ __owur MSG_PROCESS_RETURN tls_process_server_done(SSL_CONNECTION *s,
                                                   PACKET *pkt);
 __owur CON_FUNC_RETURN tls_construct_cert_verify(SSL_CONNECTION *s,
                                                  WPACKET *pkt);
+__owur CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s,
+                                                    WPACKET *pkt);
 __owur WORK_STATE tls_prepare_client_certificate(SSL_CONNECTION *s,
                                                  WORK_STATE wst);
 __owur CON_FUNC_RETURN tls_construct_client_certificate(SSL_CONNECTION *s,
@@ -230,6 +233,8 @@ __owur WORK_STATE tls_post_process_client_key_exchange(SSL_CONNECTION *s,
                                                        WORK_STATE wst);
 __owur MSG_PROCESS_RETURN tls_process_cert_verify(SSL_CONNECTION *s,
                                                   PACKET *pkt);
+__owur int tls_process_pq_cert_verify_minimal(SSL_CONNECTION *s, PACKET *pkt);
+
 #ifndef OPENSSL_NO_NEXTPROTONEG
 __owur MSG_PROCESS_RETURN tls_process_next_proto(SSL_CONNECTION *s,
                                                  PACKET *pkt);
@@ -570,3 +575,13 @@ int tls_parse_ctos_server_cert_type(SSL_CONNECTION *sc, PACKET *pkt,
 int tls_parse_stoc_server_cert_type(SSL_CONNECTION *s, PACKET *pkt,
                                     unsigned int context,
                                     X509 *x, size_t chainidx);
+EXT_RETURN tls_construct_ctos_hybrid_cert_hint(SSL_CONNECTION *s, WPACKET *pkt, 
+                                               unsigned int context, X509 *x,
+                                               size_t chainidx);
+int tls_parse_ctos_hybrid_cert_hint(SSL_CONNECTION *s, PACKET *pkt,
+                                    unsigned int context, X509 *x,
+                                    size_t chainidx);
+EXT_RETURN tls_construct_stoc_hybrid_cert_hint(SSL_CONNECTION *s, WPACKET *pkt,
+                                                 unsigned int context, X509 *x, size_t chainidx);
+int tls_parse_stoc_hybrid_cert_hint(SSL_CONNECTION *s, PACKET *pkt,
+                                      unsigned int context, X509 *x, size_t chainidx);
