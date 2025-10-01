@@ -7889,3 +7889,19 @@ int SSL_set_server_hybrid_cert_type(SSL *ssl, unsigned char cert_type)
     sc->ssl.hybrid_hint.server_type = cert_type;
     return 1;
 }
+
+int SSL_set_hybrid_private_key(SSL *ssl, EVP_PKEY *pkey)
+{
+    SSL_CONNECTION *sc = SSL_CONNECTION_FROM_SSL(ssl);
+    if (sc == NULL)
+        return 0;
+
+    if (pkey != NULL)
+        EVP_PKEY_up_ref(pkey);
+
+    if (sc->hyb_pkey != NULL)
+        EVP_PKEY_free(sc->hyb_pkey);
+
+    sc->hyb_pkey = pkey;
+    return 1;
+}

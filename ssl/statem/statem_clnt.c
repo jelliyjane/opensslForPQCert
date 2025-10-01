@@ -173,6 +173,22 @@ static int ossl_statem_client13_read_transition(SSL_CONNECTION *s, int mt)
         break;
 
     case TLS_ST_CR_CERT_VRFY:
+        if (s->ssl.hybrid_hint.hybrid_verify) {
+            if (mt == SSL3_MT_PQ_CERTIFICATE_VERIFY) {
+                st->hand_state = TLS_ST_CR_PQCERT_VRFY;
+                return 1;
+            }
+
+            break;
+        }
+
+        if (mt == SSL3_MT_FINISHED) {
+            st->hand_state = TLS_ST_CR_FINISHED;
+            return 1;
+        }
+        break;
+
+    case TLS_ST_CR_PQCERT_VRFY:
         if (mt == SSL3_MT_FINISHED) {
             st->hand_state = TLS_ST_CR_FINISHED;
             return 1;
@@ -1102,6 +1118,12 @@ MSG_PROCESS_RETURN ossl_statem_client_process_message(SSL_CONNECTION *s,
 
     case TLS_ST_CR_CERT_VRFY:
         return tls_process_cert_verify(s, pkt);
+
+    case TLS_ST_CR_PQCERT_VRFY:
+        if (tls_process_pq_cert_verify_minimal(s, pkt))
+            return 0;
+        else
+            return 1;
 
     case TLS_ST_CR_CERT_STATUS:
         return tls_process_cert_status(s, pkt);

@@ -123,7 +123,9 @@ char *psk_key = NULL;           /* by default PSK is not used */
 
 static char http_server_binmode = 0; /* for now: 0/1 = default/binary */
 
+/* PQ Hybrid TLS Benchmarking */
 static int s_hybcert_type = HYBCERT_NONE;
+static EVP_PKEY *tmp_hyb_pkey = NULL;
 
 #ifndef OPENSSL_NO_PSK
 static unsigned int psk_server_cb(SSL *ssl, const char *identity,
@@ -1797,7 +1799,7 @@ int s_server_main(int argc, char *argv[])
         BIO_printf(bio_out, "Warning: -sendfile depends on -ktls, enabling -ktls now.\n");
         enable_ktls = 1;
     }
-
+ 
     if (use_sendfile && www <= 1) {
         BIO_printf(bio_err, "Can't use -sendfile without -WWW or -HTTP\n");
         goto end;
@@ -1845,13 +1847,6 @@ int s_server_main(int argc, char *argv[])
                                 "second server certificate");
 
             if (s_cert2 == NULL)
-                goto end;
-        }
-
-        if (s_hybkey_file != NULL) {
-            s_hybkey = load_key(s_hybkey_file, s_key_format, 0, pass, engine,
-                                "server hybrid certificate private key");
-            if (s_hybkey = NULL)
                 goto end;
         }
     }
@@ -1939,6 +1934,14 @@ int s_server_main(int argc, char *argv[])
     if (ctx == NULL) {
         ERR_print_errors(bio_err);
         goto end;
+    }
+
+    /* PQ Hybrid TLS Benchmarking */
+    if (s_hybkey_file != NULL) {
+        s_hybkey = load_key(s_hybkey_file, s_key_format, 0, pass, engine,
+                            "server hybrid certificate private key");
+        if (s_hybkey != NULL)
+            tmp_hyb_pkey = s_hybkey;
     }
 
     SSL_CTX_clear_mode(ctx, SSL_MODE_AUTO_RETRY);
@@ -2492,6 +2495,11 @@ static int sv_body(int s, int stype, int prot, unsigned char *context)
             BIO_printf(bio_err, "failed to set hybrid cert hint\n");
             goto err;
         }
+    }
+
+    if (!SSL_set_hybrid_private_key(con, tmp_hyb_pkey)) {
+        BIO_printf(bio_err, "Failed to set hybrid private key on SSL_CTX\n");
+        goto err;
     }
 
     if (s_tlsextdebug) {

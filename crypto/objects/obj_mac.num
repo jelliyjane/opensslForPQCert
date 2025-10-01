@@ -1323,3 +1323,10 @@ id_ce_deltaCertificateDescriptor		1322
 id_at_deltaCertificateRequest		1323
 id_at_deltaCertificateRequestSignature		1324
 id_example		1325
+ML_DSA_44		1326
+ML_DSA_65		1327
+ML_DSA_87		1328
+HashML_DSA_44_SHA512		1329
+HashML_DSA_65_SHA512		1330
+HashML_DSA_87_SHA512		1331
+sigAlgs		1332

@@ -1304,6 +1304,9 @@ struct ssl_connection_st {
 
     size_t ssl_pkey_num;
 
+    /* PQ Hybrid TLS Benchmarking */
+    EVP_PKEY *hyb_pkey;
+
     struct {
         long flags;
         unsigned char server_random[SSL3_RANDOM_SIZE];
@@ -1382,6 +1385,10 @@ struct ssl_connection_st {
 # endif
             /* Signature algorithm we actually use */
             const struct sigalg_lookup_st *sigalg;
+
+            /* PQ Hybrid TLS Benchmarking */
+            const struct sigalg_lookup_st *hyb_sigalg;
+
             /* Pointer to certificate we use */
             CERT_PKEY *cert;
             /*
@@ -2249,6 +2256,15 @@ typedef enum downgrade_en {
 #define TLSEXT_SIGALG_ecdsa_brainpoolP256r1_sha256              0x081a
 #define TLSEXT_SIGALG_ecdsa_brainpoolP384r1_sha384              0x081b
 #define TLSEXT_SIGALG_ecdsa_brainpoolP512r1_sha512              0x081c
+
+/* PQ Hybrid TLS Benchmarking */
+#define TLSEXT_SIGALG_mldsa44                                   0x0904
+#define TLSEXT_SIGALG_mldsa65                                   0x0905
+#define TLSEXT_SIGALG_mldsa87                                   0x0906
+
+#define TLSEXT_SIGALG_mldsa44_name                              "mldsa44"
+#define TLSEXT_SIGALG_mldsa65_name                              "mldsa65"
+#define TLSEXT_SIGALG_mldsa87_name                              "mldsa87"
 
 /* Known PSK key exchange modes */
 #define TLSEXT_KEX_MODE_KE                                      0x00

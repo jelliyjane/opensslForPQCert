@@ -326,7 +326,7 @@ typedef int (*SSL_async_callback_fn)(SSL *s, void *arg);
 
 #define SSL_OP_BIT(n)  ((uint64_t)1 << (uint64_t)n)
 
-/* Using hybrid certficate in tls*/
+/* PQ Hybrid TLS Benchmarking */
 
 # define HYBCERT_NONE           0
 # define HYBCERT_CHAMELEON      1
@@ -338,6 +338,9 @@ int SSL_set_hybrid_cert_hint_list(SSL *ssl,
 int SSL_set_hybrid_cert_hint(SSL *ssl, unsigned char cert_type);
 
 int SSL_set_server_hybrid_cert_type(SSL *ssl, unsigned char cert_type);
+
+int SSL_CTX_set_hybrid_private_key(SSL_CTX *ctx, EVP_PKEY *pkey);
+int SSL_set_hybrid_private_key(SSL *ssl, EVP_PKEY *pkey);
                                   
 /*
  * SSL/TLS connection options.
@@ -1078,7 +1081,9 @@ typedef enum {
     TLS_ST_EARLY_DATA,
     TLS_ST_PENDING_EARLY_DATA_END,
     TLS_ST_CW_END_OF_EARLY_DATA,
-    TLS_ST_SR_END_OF_EARLY_DATA
+    TLS_ST_SR_END_OF_EARLY_DATA,
+    TLS_ST_SW_PQCERT_VRFY,
+    TLS_ST_CR_PQCERT_VRFY
 } OSSL_HANDSHAKE_STATE;
 
 /*

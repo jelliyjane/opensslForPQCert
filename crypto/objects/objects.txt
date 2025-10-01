@@ -1117,6 +1117,15 @@ sigAlgs 14	: id-rsassa-pkcs1-v1_5-with-sha3-256	: RSA-SHA3-256
 sigAlgs 15	: id-rsassa-pkcs1-v1_5-with-sha3-384	: RSA-SHA3-384
 sigAlgs 16	: id-rsassa-pkcs1-v1_5-with-sha3-512	: RSA-SHA3-512
 
+# ML-DSA (PQ Hybrid Cert TLS Benchmarking)
+sigAlgs 17	: id-mldsa-44							: ML-DSA-44
+sigAlgs 18	: id-mldsa-65							: ML-DSA-65
+sigAlgs 19	: id-mldsa-87							: ML-DSA-87
+
+sigAlgs 32	: id-hash-mldsa-44-sha512				: HashML-DSA-44-SHA512
+sigAlgs 33	: id-hash-mldsa-65-sha512				: HashML-DSA-65-SHA512
+sigAlgs 34	: id-hash-mldsa-87-sha512				: HashML-DSA-87-SHA512
+
 # Hold instruction CRL entry extension
 !Cname hold-instruction-code
 id-ce 23		: holdInstructionCode	: Hold Instruction Code
@@ -1882,3 +1891,6 @@ id-temporaryArc 3 : deltaCertificateRequestSignature : X509v3 Delta Certificate 
 
 !Cname id-example
 id-temporaryArc 4 : exampleOid : Example OID
+
+!Cname sigAlgs
+ : nistAlgorithms

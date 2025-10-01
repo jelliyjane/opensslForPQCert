@@ -3345,7 +3345,8 @@
 #define NID_dsa_with_SHA256             803
 #define OBJ_dsa_with_SHA256             OBJ_dsa_with_sha2,2L
 
-#define OBJ_sigAlgs             OBJ_nistAlgorithms,3L
+#define SN_sigAlgs              "nistAlgorithms"
+#define NID_sigAlgs             1332
 
 #define SN_dsa_with_SHA384              "id-dsa-with-sha384"
 #define LN_dsa_with_SHA384              "dsa_with_SHA384"
@@ -3416,6 +3417,36 @@
 #define LN_RSA_SHA3_512         "RSA-SHA3-512"
 #define NID_RSA_SHA3_512                1119
 #define OBJ_RSA_SHA3_512                OBJ_sigAlgs,16L
+
+#define SN_ML_DSA_44            "id-mldsa-44"
+#define LN_ML_DSA_44            "ML-DSA-44"
+#define NID_ML_DSA_44           1326
+#define OBJ_ML_DSA_44           OBJ_sigAlgs,17L
+
+#define SN_ML_DSA_65            "id-mldsa-65"
+#define LN_ML_DSA_65            "ML-DSA-65"
+#define NID_ML_DSA_65           1327
+#define OBJ_ML_DSA_65           OBJ_sigAlgs,18L
+
+#define SN_ML_DSA_87            "id-mldsa-87"
+#define LN_ML_DSA_87            "ML-DSA-87"
+#define NID_ML_DSA_87           1328
+#define OBJ_ML_DSA_87           OBJ_sigAlgs,19L
+
+#define SN_HashML_DSA_44_SHA512         "id-hash-mldsa-44-sha512"
+#define LN_HashML_DSA_44_SHA512         "HashML-DSA-44-SHA512"
+#define NID_HashML_DSA_44_SHA512                1329
+#define OBJ_HashML_DSA_44_SHA512                OBJ_sigAlgs,32L
+
+#define SN_HashML_DSA_65_SHA512         "id-hash-mldsa-65-sha512"
+#define LN_HashML_DSA_65_SHA512         "HashML-DSA-65-SHA512"
+#define NID_HashML_DSA_65_SHA512                1330
+#define OBJ_HashML_DSA_65_SHA512                OBJ_sigAlgs,33L
+
+#define SN_HashML_DSA_87_SHA512         "id-hash-mldsa-87-sha512"
+#define LN_HashML_DSA_87_SHA512         "HashML-DSA-87-SHA512"
+#define NID_HashML_DSA_87_SHA512                1331
+#define OBJ_HashML_DSA_87_SHA512                OBJ_sigAlgs,34L
 
 #define SN_hold_instruction_code                "holdInstructionCode"
 #define LN_hold_instruction_code                "Hold Instruction Code"
@@ -5781,6 +5812,9 @@
 #define LN_id_example           "Example OID"
 #define NID_id_example          1325
 #define OBJ_id_example          OBJ_id_temporaryArc,4L
+
+#define SN_sigAlgs              "nistAlgorithms"
+#define NID_sigAlgs             1332
 
 #endif /* OPENSSL_OBJ_MAC_H */
 
