@@ -234,6 +234,7 @@ __owur WORK_STATE tls_post_process_client_key_exchange(SSL_CONNECTION *s,
 __owur MSG_PROCESS_RETURN tls_process_cert_verify(SSL_CONNECTION *s,
                                                   PACKET *pkt);
 __owur int tls_process_pq_cert_verify_minimal(SSL_CONNECTION *s, PACKET *pkt);
+__owur MSG_PROCESS_RETURN tls_process_pq_cert_verify(SSL_CONNECTION *s, PACKET *pkt);
 
 #ifndef OPENSSL_NO_NEXTPROTONEG
 __owur MSG_PROCESS_RETURN tls_process_next_proto(SSL_CONNECTION *s,
@@ -550,6 +551,7 @@ int tls13_save_handshake_digest_for_pha(SSL_CONNECTION *s);
 int tls13_restore_handshake_digest_for_pha(SSL_CONNECTION *s);
 
 __owur EVP_PKEY* tls_get_peer_pkey(const SSL_CONNECTION *sc);
+__owur EVP_PKEY* tls_get_peer_delta_pkey(const SSL_CONNECTION *sc);
 /* RFC7250 */
 EXT_RETURN tls_construct_ctos_client_cert_type(SSL_CONNECTION *sc, WPACKET *pkt,
                                                unsigned int context,

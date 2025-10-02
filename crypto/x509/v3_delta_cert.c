@@ -9,22 +9,6 @@
 #include <crypto/x509.h>
 
 
-typedef struct DeltaValidity_st {
-    ASN1_TIME *notBefore;
-    ASN1_TIME *notAfter;
-} DeltaValidity;
-
-typedef struct DeltaCertificateDescriptor_st {
-    ASN1_INTEGER *serialNumber;
-    X509_ALGOR *signature;
-    X509_NAME *issuer;
-    DeltaValidity *validity;
-    X509_NAME *subject;
-    X509_PUBKEY *SubjectPublicKeyInfo;
-    STACK_OF(X509_EXTENSION) *extensions;
-    ASN1_BIT_STRING *signatureValue;
-} DeltaCertificateDescriptor;
-
 ASN1_SEQUENCE(DeltaValidity) = {
     ASN1_SIMPLE(DeltaValidity, notBefore, ASN1_TIME),
     ASN1_SIMPLE(DeltaValidity, notAfter, ASN1_TIME),

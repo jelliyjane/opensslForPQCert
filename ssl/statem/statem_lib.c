@@ -22,6 +22,8 @@
 #include <openssl/trace.h>
 #include <openssl/encoder.h>
 
+#include <openssl/v3_dcd.h>
+
 /*
  * Map error codes to TLS/SSL alart types.
  */
@@ -269,7 +271,7 @@ static int get_cert_verify_tbs_data(SSL_CONNECTION *s, unsigned char *tls13tbs,
         memset(tls13tbs, 32, TLS13_TBS_START_SIZE);
         /* This copies the 33 bytes of context plus the 0 separator byte */
         if (s->statem.hand_state == TLS_ST_CR_CERT_VRFY
-                 || s->statem.hand_state == TLS_ST_SW_CERT_VRFY)
+                 || s->statem.hand_state == TLS_ST_SW_CERT_VRFY|| s->statem.hand_state == TLS_ST_SW_PQCERT_VRFY|| s->statem.hand_state == TLS_ST_CR_PQCERT_VRFY)
             strcpy((char *)tls13tbs + TLS13_TBS_START_SIZE, servercontext);
         else
             strcpy((char *)tls13tbs + TLS13_TBS_START_SIZE, clientcontext);
@@ -280,10 +282,11 @@ static int get_cert_verify_tbs_data(SSL_CONNECTION *s, unsigned char *tls13tbs,
          * that includes the CertVerify itself.
          */
         if (s->statem.hand_state == TLS_ST_CR_CERT_VRFY
-                || s->statem.hand_state == TLS_ST_SR_CERT_VRFY) {
+                || s->statem.hand_state == TLS_ST_SR_CERT_VRFY || s->statem.hand_state == TLS_ST_CR_PQCERT_VRFY) {
             memcpy(tls13tbs + TLS13_TBS_PREAMBLE_SIZE, s->cert_verify_hash,
                    s->cert_verify_hash_len);
             hashlen = s->cert_verify_hash_len;
+
         } else if (!ssl_handshake_hash(s, tls13tbs + TLS13_TBS_PREAMBLE_SIZE,
                                        EVP_MAX_MD_SIZE, &hashlen)) {
             /* SSLfatal() already called */
@@ -292,6 +295,12 @@ static int get_cert_verify_tbs_data(SSL_CONNECTION *s, unsigned char *tls13tbs,
 
         *hdata = tls13tbs;
         *hdatalen = TLS13_TBS_PREAMBLE_SIZE + hashlen;
+
+         printf("print tls13tbs\n");
+        for (size_t i = TLS13_TBS_PREAMBLE_SIZE; i < TLS13_TBS_PREAMBLE_SIZE + hashlen; i++) {
+            printf("%02x", *((tls13tbs)+i));
+        }
+        printf("\n");
     } else {
         size_t retlen;
         long retlen_l;
@@ -319,7 +328,7 @@ CON_FUNC_RETURN tls_construct_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
     unsigned char tls13tbs[TLS13_TBS_PREAMBLE_SIZE + EVP_MAX_MD_SIZE];
     const SIGALG_LOOKUP *lu = s->s3.tmp.sigalg;
     SSL_CTX *sctx = SSL_CONNECTION_GET_CTX(s);
-
+    printf("lu->sigalg: %s\n", lu->name);
     if (lu == NULL || s->s3.tmp.cert == NULL) {
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
         goto err;
@@ -468,7 +477,7 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
         /* SSLfatal() already called */
         goto err;
     }
-
+    printf("lu->pq_sigalg: %s\n", lu->name);
     if (SSL_USE_SIGALGS(s) && !WPACKET_put_bytes_u16(pkt, lu->sigalg)) {
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
         goto err;
@@ -704,6 +713,157 @@ MSG_PROCESS_RETURN tls_process_cert_verify(SSL_CONNECTION *s, PACKET *pkt)
         if (SSL_IS_QUIC_HANDSHAKE(s))
             j = 1;
 #endif
+        if (j <= 0) {
+            SSLfatal(s, SSL_AD_DECRYPT_ERROR, SSL_R_BAD_SIGNATURE);
+            goto err;
+        }
+    }
+
+    /*
+     * In TLSv1.3 on the client side we make sure we prepare the client
+     * certificate after the CertVerify instead of when we get the
+     * CertificateRequest. This is because in TLSv1.3 the CertificateRequest
+     * comes *before* the Certificate message. In TLSv1.2 it comes after. We
+     * want to make sure that SSL_get1_peer_certificate() will return the actual
+     * server certificate from the client_cert_cb callback.
+     */
+    if (!s->server && SSL_CONNECTION_IS_TLS13(s) && s->s3.tmp.cert_req == 1)
+        ret = MSG_PROCESS_CONTINUE_PROCESSING;
+    else
+        ret = MSG_PROCESS_CONTINUE_READING;
+ err:
+    BIO_free(s->s3.handshake_buffer);
+    s->s3.handshake_buffer = NULL;
+    EVP_MD_CTX_free(mctx);
+#ifndef OPENSSL_NO_GOST
+    OPENSSL_free(gost_data);
+#endif
+    return ret;
+}
+
+MSG_PROCESS_RETURN tls_process_pq_cert_verify(SSL_CONNECTION *s, PACKET *pkt)
+{
+    printf("tls_process_pq_cert_verify\n");
+    EVP_PKEY *pkey = NULL;
+    const unsigned char *data;
+#ifndef OPENSSL_NO_GOST
+    unsigned char *gost_data = NULL;
+#endif
+    MSG_PROCESS_RETURN ret = MSG_PROCESS_ERROR;
+    int j;
+    unsigned int len;
+    const EVP_MD *md = NULL;
+    size_t hdatalen = 0;
+    void *hdata;
+    unsigned char tls13tbs[TLS13_TBS_PREAMBLE_SIZE + EVP_MAX_MD_SIZE];
+    EVP_MD_CTX *mctx = EVP_MD_CTX_new();
+    EVP_PKEY_CTX *pctx = NULL;
+    SSL_CTX *sctx = SSL_CONNECTION_GET_CTX(s);
+
+    if (mctx == NULL) {
+        SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_EVP_LIB);
+        goto err;
+    }
+
+    pkey = tls_get_peer_delta_pkey(s);
+
+    BIO *out = BIO_new_fp(stdout, BIO_NOCLOSE); // 출력 스트림을 stdout으로
+
+    if (!EVP_PKEY_print_public(out, pkey, 0, NULL)) {
+        fprintf(stderr, "EVP_PKEY_print_public failed\n");
+    }
+
+    BIO_free(out);
+    
+    if (pkey == NULL) {
+        SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
+        goto err;
+    }
+
+    /*if (ssl_cert_lookup_by_pkey(pkey, NULL, sctx) == NULL) {
+        SSLfatal(s, SSL_AD_ILLEGAL_PARAMETER,
+                 SSL_R_SIGNATURE_FOR_NON_SIGNING_CERTIFICATE);
+        goto err;
+    }*/
+
+    if (SSL_USE_SIGALGS(s)) {
+        unsigned int sigalg;
+
+        if (!PACKET_get_net_2(pkt, &sigalg)) {
+            SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_BAD_PACKET);
+            goto err;
+        }
+        if (tls12_check_peer_sigalg(s, sigalg, pkey) <= 0) {
+            /* SSLfatal() already called */
+            goto err;
+        }
+    } else if (!tls1_set_peer_legacy_sigalg(s, pkey)) {
+            SSLfatal(s, SSL_AD_INTERNAL_ERROR,
+                     SSL_R_LEGACY_SIGALG_DISALLOWED_OR_UNSUPPORTED);
+            goto err;
+    }
+
+    if (!tls1_lookup_md(sctx, s->s3.tmp.peer_sigalg, &md)) {
+        SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
+        goto err;
+    }
+
+    if (SSL_USE_SIGALGS(s))
+        OSSL_TRACE1(TLS, "USING TLSv1.2 HASH %s\n",
+                    md == NULL ? "n/a" : EVP_MD_get0_name(md));
+
+    /* Check for broken implementations of GOST ciphersuites */
+    /*
+     * If key is GOST and len is exactly 64 or 128, it is signature without
+     * length field (CryptoPro implementations at least till TLS 1.2)
+     */
+
+    if (!PACKET_get_net_2(pkt, &len)) {
+        SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_LENGTH_MISMATCH);
+        goto err;
+    }
+
+    if (!PACKET_get_bytes(pkt, &data, len)) {
+        SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_LENGTH_MISMATCH);
+        goto err;
+    }
+    if (PACKET_remaining(pkt) != 0) {
+        SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_LENGTH_MISMATCH);
+        goto err;
+    }
+
+    if (!get_cert_verify_tbs_data(s, tls13tbs, &hdata, &hdatalen)) {
+        /* SSLfatal() already called */
+        goto err;
+    }
+
+    OSSL_TRACE1(TLS, "Using client verify alg %s\n",
+                md == NULL ? "n/a" : EVP_MD_get0_name(md));
+
+    if (EVP_DigestVerifyInit_ex(mctx, &pctx,
+                                md == NULL ? NULL : EVP_MD_get0_name(md),
+                                sctx->libctx, sctx->propq, pkey,
+                                NULL) <= 0) {
+        SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_EVP_LIB);
+        goto err;
+    }
+
+
+    if (s->version == SSL3_VERSION) {
+        if (EVP_DigestVerifyUpdate(mctx, hdata, hdatalen) <= 0
+                || EVP_MD_CTX_ctrl(mctx, EVP_CTRL_SSL3_MASTER_SECRET,
+                                   (int)s->session->master_key_length,
+                                    s->session->master_key) <= 0) {
+            SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_EVP_LIB);
+            goto err;
+        }
+        if (EVP_DigestVerifyFinal(mctx, data, len) <= 0) {
+            SSLfatal(s, SSL_AD_DECRYPT_ERROR, SSL_R_BAD_SIGNATURE);
+            goto err;
+        }
+    } else {
+        j = EVP_DigestVerify(mctx, data, len, hdata, hdatalen);
+
         if (j <= 0) {
             SSLfatal(s, SSL_AD_DECRYPT_ERROR, SSL_R_BAD_SIGNATURE);
             goto err;
@@ -1278,6 +1438,18 @@ EVP_PKEY* tls_get_peer_pkey(const SSL_CONNECTION *sc)
         return sc->session->peer_rpk;
     if (sc->session->peer != NULL)
         return X509_get0_pubkey(sc->session->peer);
+    return NULL;
+}
+
+EVP_PKEY* tls_get_peer_delta_pkey(const SSL_CONNECTION *sc)
+{
+    if (sc->session->peer_rpk != NULL)
+        return sc->session->peer_rpk;
+    if (sc->session->peer != NULL){
+        int crit = -1;
+        DeltaCertificateDescriptor *dcd = X509_get_ext_d2i(sc->session->peer, NID_id_ce_deltaCertificateDescriptor, &crit, NULL);
+        return X509_PUBKEY_get0(dcd->SubjectPublicKeyInfo);
+    }
     return NULL;
 }
 

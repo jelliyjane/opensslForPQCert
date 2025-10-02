@@ -1051,6 +1051,9 @@ size_t ossl_statem_client_max_message_size(SSL_CONNECTION *s)
     case TLS_ST_CR_CERT_VRFY:
         return CERTIFICATE_VERIFY_MAX_LENGTH;
 
+    case TLS_ST_CR_PQCERT_VRFY:
+        return CERTIFICATE_VERIFY_MAX_LENGTH;
+
     case TLS_ST_CR_CERT_STATUS:
         return SSL3_RT_MAX_PLAIN_LENGTH;
 
@@ -1120,10 +1123,13 @@ MSG_PROCESS_RETURN ossl_statem_client_process_message(SSL_CONNECTION *s,
         return tls_process_cert_verify(s, pkt);
 
     case TLS_ST_CR_PQCERT_VRFY:
+        return tls_process_pq_cert_verify(s, pkt);
+        /*
         if (tls_process_pq_cert_verify_minimal(s, pkt))
             return 0;
         else
             return 1;
+        */
 
     case TLS_ST_CR_CERT_STATUS:
         return tls_process_cert_status(s, pkt);

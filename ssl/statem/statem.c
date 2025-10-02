@@ -644,6 +644,8 @@ static SUB_STATE_RETURN read_state_machine(SSL_CONNECTION *s)
             if (!transition(s, mt))
                 return SUB_STATE_ERROR;
 
+            printf("length: %zu\n", s->s3.tmp.message_size);
+            printf("max length: %zu\n", max_message_size(s));
             if (s->s3.tmp.message_size > max_message_size(s)) {
                 SSLfatal(s, SSL_AD_ILLEGAL_PARAMETER,
                          SSL_R_EXCESSIVE_MESSAGE_SIZE);

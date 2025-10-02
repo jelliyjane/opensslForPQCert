@@ -1292,7 +1292,7 @@ int tls_parse_stoc_hybrid_cert_hint(SSL_CONNECTION *s, PACKET *pkt,
         "hybrid_cert_select (ServerHello): received_type=%s\n",
         HYBCERT_TYPE_NAME(s->ssl.hybrid_hint.selected_type));
 #endif
-
+    s->ssl.hybrid_hint.hybrid_verify = 1;
     return 1;
 
 decode_err:

@@ -1905,6 +1905,7 @@ int tls12_check_peer_sigalg(SSL_CONNECTION *s, uint16_t sig, EVP_PKEY *pkey)
             pkeyid = EVP_PKEY_RSA_PSS;
     }
     lu = tls1_lookup_sigalg(s, sig);
+    printf("certverify alg: %s\n", lu->name);
     /* if this sigalg is loaded, set so far unknown pkeyid to its sig NID */
     if ((pkeyid == EVP_PKEY_KEYMGMT) && (lu != NULL))
         pkeyid = lu->sig;
@@ -3717,9 +3718,6 @@ static const SIGALG_LOOKUP *find_sig_alg(SSL_CONNECTION *s, X509 *x,
 
     /* Look for a shared sigalgs matching possible certificates */
     for (i = 0; i < s->shared_sigalgslen; i++) {
-        if (s->shared_sigalgs[i]->name == "mldsa44") {
-            lu = s->shared_sigalgs[i];
-        }
 
         lu = s->shared_sigalgs[i];
 
@@ -3769,43 +3767,13 @@ SSL_CTX *sctx = SSL_CONNECTION_GET_CTX(s);
 
 /* Look for a shared sigalgs matching possible certificates */
 for (i = 0; i < s->shared_sigalgslen; i++) {
-if (s->shared_sigalgs[i]->name == "mldsa44") {
-lu = s->shared_sigalgs[i];
+    printf("s->shared_sigalgs[i]->name: %s\n",s->shared_sigalgs[i]->name);
+    if (!strcmp(s->shared_sigalgs[i]->name, "p256_mldsa44")) {
+        lu = s->shared_sigalgs[i];
+        printf("lu->name: %s\n",lu->name);
+        return lu;        
+    }
 }
-
-lu = s->shared_sigalgs[i];
-
-/* Skip SHA1, SHA224, DSA and RSA if not PSS */
-if (lu->hash == NID_sha1
-|| lu->hash == NID_sha224
-|| lu->sig == EVP_PKEY_DSA
-|| lu->sig == EVP_PKEY_RSA)
-continue;
-/* Check that we have a cert, and signature_algorithms_cert */
-if (!tls1_lookup_md(sctx, lu, NULL))
-continue;
-if ((pkey == NULL && !has_usable_cert(s, lu, -1))
-|| (pkey != NULL && !is_cert_usable(s, lu, x, pkey)))
-continue;
-
-tmppkey = (pkey != NULL) ? pkey
-: s->cert->pkeys[lu->sig_idx].privatekey;
-
-if (lu->sig == EVP_PKEY_EC) {
-if (curve == -1)
-curve = ssl_get_EC_curve_nid(tmppkey);
-if (lu->curve != NID_undef && curve != lu->curve)
-continue;
-} else if (lu->sig == EVP_PKEY_RSA_PSS) {
-/* validate that key is large enough for the signature algorithm */
-if (!rsa_pss_check_min_key_size(sctx, tmppkey, lu))
-continue;
-}
-break;
-}
-
-if (i == s->shared_sigalgslen)
-return NULL;
 
 return lu;
 }
@@ -3828,6 +3796,7 @@ int tls_choose_sigalg(SSL_CONNECTION *s, int fatalerrs)
 
     s->s3.tmp.cert = NULL;
     s->s3.tmp.sigalg = NULL;
+    s->s3.tmp.hyb_sigalg = NULL;
 
     if (SSL_CONNECTION_IS_TLS13(s)) {
         lu = find_sig_alg(s, NULL, NULL);
@@ -3840,7 +3809,7 @@ int tls_choose_sigalg(SSL_CONNECTION *s, int fatalerrs)
         }
 
         hlu = find_pq_sig_alg(s, NULL, NULL);
-
+        printf("hlu->name: %s\n", hlu->name);
         if (hlu == NULL) {
             if (!fatalerrs)
                 return 1;
