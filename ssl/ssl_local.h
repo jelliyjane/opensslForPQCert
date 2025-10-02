@@ -1389,6 +1389,9 @@ struct ssl_connection_st {
             /* PQ Hybrid TLS Benchmarking */
             const struct sigalg_lookup_st *hyb_sigalg;
 
+            unsigned char *hyb_tbs;
+            size_t hash_len;
+
             /* Pointer to certificate we use */
             CERT_PKEY *cert;
             /*
@@ -2257,7 +2260,7 @@ typedef enum downgrade_en {
 #define TLSEXT_SIGALG_ecdsa_brainpoolP384r1_sha384              0x081b
 #define TLSEXT_SIGALG_ecdsa_brainpoolP512r1_sha512              0x081c
 
-/* PQ Hybrid TLS Benchmarking */
+/* PQ Hybrid TLS Benchmarking 
 #define TLSEXT_SIGALG_mldsa44                                   0x0904
 #define TLSEXT_SIGALG_mldsa65                                   0x0905
 #define TLSEXT_SIGALG_mldsa87                                   0x0906
@@ -2265,7 +2268,7 @@ typedef enum downgrade_en {
 #define TLSEXT_SIGALG_mldsa44_name                              "mldsa44"
 #define TLSEXT_SIGALG_mldsa65_name                              "mldsa65"
 #define TLSEXT_SIGALG_mldsa87_name                              "mldsa87"
-
+*/
 /* Known PSK key exchange modes */
 #define TLSEXT_KEX_MODE_KE                                      0x00
 #define TLSEXT_KEX_MODE_KE_DHE                                  0x01

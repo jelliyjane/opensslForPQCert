@@ -287,6 +287,10 @@ static int get_cert_verify_tbs_data(SSL_CONNECTION *s, unsigned char *tls13tbs,
                    s->cert_verify_hash_len);
             hashlen = s->cert_verify_hash_len;
 
+        }else if(s->statem.hand_state == TLS_ST_SW_PQCERT_VRFY){
+            *hdata =s->s3.tmp.hyb_tbs;
+            *hdatalen =s->s3.tmp.hash_len;
+            return 1;
         } else if (!ssl_handshake_hash(s, tls13tbs + TLS13_TBS_PREAMBLE_SIZE,
                                        EVP_MAX_MD_SIZE, &hashlen)) {
             /* SSLfatal() already called */
@@ -294,7 +298,9 @@ static int get_cert_verify_tbs_data(SSL_CONNECTION *s, unsigned char *tls13tbs,
         }
 
         *hdata = tls13tbs;
+        s->s3.tmp.hyb_tbs=tls13tbs;
         *hdatalen = TLS13_TBS_PREAMBLE_SIZE + hashlen;
+        s->s3.tmp.hash_len = TLS13_TBS_PREAMBLE_SIZE + hashlen;
 
          printf("print tls13tbs\n");
         for (size_t i = TLS13_TBS_PREAMBLE_SIZE; i < TLS13_TBS_PREAMBLE_SIZE + hashlen; i++) {
@@ -408,6 +414,13 @@ CON_FUNC_RETURN tls_construct_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
             SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_EVP_LIB);
             goto err;
         }
+        printf("=== sig (%zu bytes) ===\n", siglen);
+        for (size_t i = 0; i < siglen; i++) {
+            printf("%02x", sig[i]);
+            if ((i + 1) % 16 == 0)
+                printf("\n");
+        }
+        printf("\n");
     }
 
 #ifndef OPENSSL_NO_GOST
@@ -534,6 +547,14 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
             SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_EVP_LIB);
             goto err;
         }
+
+        printf("=== sig (%zu bytes) ===\n", siglen);
+        for (size_t i = 0; i < siglen; i++) {
+            printf("%02x", sig[i]);
+            if ((i + 1) % 16 == 0)
+                printf("\n");
+        }
+        printf("\n");
     }
 
 #ifndef OPENSSL_NO_GOST
@@ -694,6 +715,24 @@ MSG_PROCESS_RETURN tls_process_cert_verify(SSL_CONNECTION *s, PACKET *pkt)
             goto err;
         }
     }
+
+    printf("hdata (%zu bytes):\n", hdatalen);
+    for (size_t i = 0; i < hdatalen; i++) {
+        printf("%02x", ((unsigned char *)hdata)[i]);
+        if ((i + 1) % 16 == 0)
+            printf("\n");
+    }
+
+    printf("\n");
+
+    printf("data (%zu bytes):\n", len);
+    for (size_t i = 0; i < len; i++) {
+        printf("%02x", data[i]);
+        if ((i + 1) % 16 == 0)
+            printf("\n");
+    }
+
+    printf("\n");
     if (s->version == SSL3_VERSION) {
         if (EVP_DigestVerifyUpdate(mctx, hdata, hdatalen) <= 0
                 || EVP_MD_CTX_ctrl(mctx, EVP_CTRL_SSL3_MASTER_SECRET,
@@ -766,7 +805,7 @@ MSG_PROCESS_RETURN tls_process_pq_cert_verify(SSL_CONNECTION *s, PACKET *pkt)
     }
 
     pkey = tls_get_peer_delta_pkey(s);
-
+    /* print delta certificate public key
     BIO *out = BIO_new_fp(stdout, BIO_NOCLOSE); // 출력 스트림을 stdout으로
 
     if (!EVP_PKEY_print_public(out, pkey, 0, NULL)) {
@@ -774,7 +813,7 @@ MSG_PROCESS_RETURN tls_process_pq_cert_verify(SSL_CONNECTION *s, PACKET *pkt)
     }
 
     BIO_free(out);
-    
+    */
     if (pkey == NULL) {
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
         goto err;
@@ -807,6 +846,7 @@ MSG_PROCESS_RETURN tls_process_pq_cert_verify(SSL_CONNECTION *s, PACKET *pkt)
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
         goto err;
     }
+    //printf("s->s3.tmp.peer_sigalg: %s\n", s->s3.tmp.peer_sigalg->name);
 
     if (SSL_USE_SIGALGS(s))
         OSSL_TRACE1(TLS, "USING TLSv1.2 HASH %s\n",
@@ -848,6 +888,22 @@ MSG_PROCESS_RETURN tls_process_pq_cert_verify(SSL_CONNECTION *s, PACKET *pkt)
         goto err;
     }
 
+printf("hdata (%zu bytes):\n", hdatalen);
+for (size_t i = 0; i < hdatalen; i++) {
+    printf("%02x", ((unsigned char *)hdata)[i]);
+    if ((i + 1) % 16 == 0)
+        printf("\n");
+}
+printf("\n");
+
+    printf("data (%zu bytes):\n", len);
+    for (size_t i = 0; i < len; i++) {
+        printf("%02x", data[i]);
+        if ((i + 1) % 16 == 0)
+            printf("\n");
+    }
+
+    printf("\n");
 
     if (s->version == SSL3_VERSION) {
         if (EVP_DigestVerifyUpdate(mctx, hdata, hdatalen) <= 0

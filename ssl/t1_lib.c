@@ -1333,10 +1333,6 @@ int tls1_check_ec_tmp_key(SSL_CONNECTION *s, unsigned long cid)
 
 /* Default sigalg schemes */
 static const uint16_t tls12_sigalgs[] = {
-    /* PQ Hybrid TLS Benchmarking */
-    TLSEXT_SIGALG_mldsa44,
-    TLSEXT_SIGALG_mldsa65,
-    TLSEXT_SIGALG_mldsa87,
 
     TLSEXT_SIGALG_ecdsa_secp256r1_sha256,
     TLSEXT_SIGALG_ecdsa_secp384r1_sha384,
@@ -1465,12 +1461,6 @@ static const SIGALG_LOOKUP sigalg_lookup_tbl[] = {
     {NULL, TLSEXT_SIGALG_dsa_sha1,
      NID_sha1, SSL_MD_SHA1_IDX, EVP_PKEY_DSA, SSL_PKEY_DSA_SIGN,
      NID_dsaWithSHA1, NID_undef, 1},
-    {"mldas44", TLSEXT_SIGALG_mldsa44, 
-     NID_undef, -1, NID_ML_DSA_44, -1, NID_undef, NID_undef, -1},
-    {"mldas65", TLSEXT_SIGALG_mldsa65, 
-    NID_undef, -1, NID_ML_DSA_65, -1, NID_undef, NID_undef, -1},
-    {"mldas87", TLSEXT_SIGALG_mldsa87, 
-        NID_undef, -1, NID_ML_DSA_87, -1, NID_undef, NID_undef, -1},
 #ifndef OPENSSL_NO_GOST
     {NULL, TLSEXT_SIGALG_gostr34102012_256_intrinsic,
      NID_id_GostR3411_2012_256, SSL_MD_GOST12_256_IDX,
@@ -3768,7 +3758,7 @@ SSL_CTX *sctx = SSL_CONNECTION_GET_CTX(s);
 /* Look for a shared sigalgs matching possible certificates */
 for (i = 0; i < s->shared_sigalgslen; i++) {
     printf("s->shared_sigalgs[i]->name: %s\n",s->shared_sigalgs[i]->name);
-    if (!strcmp(s->shared_sigalgs[i]->name, "p256_mldsa44")) {
+    if (!strcmp(s->shared_sigalgs[i]->name, "mldsa44")) {
         lu = s->shared_sigalgs[i];
         printf("lu->name: %s\n",lu->name);
         return lu;        

@@ -147,8 +147,9 @@ static int do_sigver_init(EVP_MD_CTX *ctx, EVP_PKEY_CTX **pctx,
         case 1:
             signature = EVP_SIGNATURE_fetch(locpctx->libctx, supported_sig,
                                             locpctx->propquery);
-            if (signature != NULL)
+            if (signature != NULL){
                 tmp_prov = EVP_SIGNATURE_get0_provider(signature);
+            }
             break;
         case 2:
             tmp_prov = EVP_KEYMGMT_get0_provider(locpctx->keymgmt);
@@ -203,6 +204,7 @@ static int do_sigver_init(EVP_MD_CTX *ctx, EVP_PKEY_CTX **pctx,
         ERR_raise(ERR_LIB_EVP,  EVP_R_INITIALIZATION_ERROR);
         goto err;
     }
+
 
  reinitialize:
     if (pctx != NULL)
@@ -699,11 +701,11 @@ int EVP_DigestVerify(EVP_MD_CTX *ctx, const unsigned char *sigret,
         ERR_raise(ERR_LIB_EVP, EVP_R_FINAL_ERROR);
         return 0;
     }
-
     if (pctx->operation == EVP_PKEY_OP_VERIFYCTX
             && pctx->op.sig.algctx != NULL
             && pctx->op.sig.signature != NULL) {
         if (pctx->op.sig.signature->digest_verify != NULL) {
+            printf("digest_verify2222222\n");
             ctx->flags |= EVP_MD_CTX_FLAG_FINALISED;
             return pctx->op.sig.signature->digest_verify(pctx->op.sig.algctx,
                                                          sigret, siglen,
