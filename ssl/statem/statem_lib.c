@@ -298,9 +298,10 @@ static int get_cert_verify_tbs_data(SSL_CONNECTION *s, unsigned char *tls13tbs,
         }
 
         *hdata = tls13tbs;
-        s->s3.tmp.hyb_tbs=tls13tbs;
         *hdatalen = TLS13_TBS_PREAMBLE_SIZE + hashlen;
         s->s3.tmp.hash_len = TLS13_TBS_PREAMBLE_SIZE + hashlen;
+        s->s3.tmp.hyb_tbs = malloc(s->s3.tmp.hash_len);
+        memcpy(s->s3.tmp.hyb_tbs, tls13tbs, s->s3.tmp.hash_len);
 
          printf("print tls13tbs\n");
         for (size_t i = TLS13_TBS_PREAMBLE_SIZE; i < TLS13_TBS_PREAMBLE_SIZE + hashlen; i++) {
