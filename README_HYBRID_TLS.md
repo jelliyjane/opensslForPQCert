@@ -1,4 +1,4 @@
-# Chameleon Certificate Implementation for OpenSSL
+# Hybrid TLS Implementation for OpenSSL
 
 This project implements the "Hybrid TLS" approach for the OpenSSL cryptographic library, providing full support for the hybrid certificates(e.g., Chameleon, Catalyst, etc.) that combine classical and post-quantum cryptography (PQC) in TLS 1.3 handshakes.
 
@@ -21,7 +21,7 @@ This implementation extends OpenSSL 3.3.4 to integrate PQC algorithms via the OQ
 
 ## Features
 
-Implemented Components
+**Implemented Components**
 1.	**Hybrid Certificate Framework**
     - Added hyb_cert and hyb_pkey fields to CERT and SSL_CONNECTION
     - Supports dual private-key management
