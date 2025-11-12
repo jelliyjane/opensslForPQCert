@@ -19,7 +19,8 @@ $OPENSSLSRC=\
         s_client.c s_server.c s_time.c sess_id.c smime.c speed.c \
         spkac.c verify.c version.c x509.c rehash.c storeutl.c \
         list.c info.c fipsinstall.c pkcs12.c \
-        ../crypto/x509/v3_certbind.c
+        ../crypto/x509/v3_certbind.c \
+        
 IF[{- !$disabled{'ec'} -}]
   $OPENSSLSRC=$OPENSSLSRC ec.c ecparam.c
 ENDIF
@@ -88,4 +89,5 @@ IF[{- !$disabled{apps} -}]
   # without extension must be installed as well.  Unix or Unix lookalike only.
   SCRIPTS{misc,linkname=tsget}=tsget.pl
   SOURCE[tsget.pl]=tsget.in
+  
 ENDIF

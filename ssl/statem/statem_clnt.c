@@ -174,12 +174,16 @@ static int ossl_statem_client13_read_transition(SSL_CONNECTION *s, int mt)
             st->hand_state = TLS_ST_CR_CERT_VRFY;
             return 1;
         }
+        /* Also accept PQ_CERTIFICATE_VERIFY for PQC certificates */
+        if (mt == SSL3_MT_PQ_CERTIFICATE_VERIFY) {
+            st->hand_state = TLS_ST_CR_PQ_CERT_VRFY;
+            return 1;
+        }
         break;
 
     case TLS_ST_CR_CERT_VRFY:
-        /* Check if dual certificates are enabled and we need to expect PQ certificate verify */
-        if (s->session->dual_certs_enabled && mt == SSL3_MT_PQ_CERTIFICATE_VERIFY) {
-    
+        /* Check if this is a PQC certificate (dual, PQC-only, or composite) - all use PQ_CERTIFICATE_VERIFY */
+        if (mt == SSL3_MT_PQ_CERTIFICATE_VERIFY) {
             st->hand_state = TLS_ST_CR_PQ_CERT_VRFY;
             return 1;
         }
@@ -1206,16 +1210,11 @@ WORK_STATE ossl_statem_client_post_process_message(SSL_CONNECTION *s,
         return tls_post_process_server_certificate(s, wst);
 
     case TLS_ST_CR_CERT_VRFY:
-        /* Check if dual certificates are enabled and we need to expect PQ certificate verify */
-        if (s->session->dual_certs_enabled) {
-    
-            st->hand_state = TLS_ST_CR_PQ_CERT_VRFY;
-            return WORK_MORE_A;
-        }
+        /* After processing classic certificate verify, prepare for next step */
         return tls_prepare_client_certificate(s, wst);
 
     case TLS_ST_CR_PQ_CERT_VRFY:
-        /* After processing PQ certificate verify, prepare for next step */
+        /* After processing PQ certificate verify (dual, PQC-only, or composite), prepare for next step */
         return tls_prepare_client_certificate(s, wst);
 
     case TLS_ST_CR_CERT_REQ:
@@ -2099,7 +2098,6 @@ MSG_PROCESS_RETURN tls_process_server_certificate(SSL_CONNECTION *s,
         }
         
                     if (!PACKET_get_bytes(pkt, &certbytes, cert_len)) {
-            printf("[DUAL_CERT] Failed to read certificate %zu data\n", chainidx);
                 SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_CERT_LENGTH_MISMATCH);
                 goto err;
             }
@@ -2108,7 +2106,6 @@ MSG_PROCESS_RETURN tls_process_server_certificate(SSL_CONNECTION *s,
             certstart = certbytes;
             x = X509_new_ex(sctx->libctx, sctx->propq);
             if (x == NULL) {
-            printf("[DUAL_CERT] Failed to create X509 object for certificate %zu\n", chainidx);
                 SSLfatal(s, SSL_AD_DECODE_ERROR, ERR_R_ASN1_LIB);
                 goto err;
             }
@@ -2222,7 +2219,6 @@ WORK_STATE tls_post_process_server_certificate(SSL_CONNECTION *s,
     pkey = X509_get0_pubkey(x);
 
     if (pkey == NULL || EVP_PKEY_missing_parameters(pkey)) {
-        printf("[DUAL_CERT] Invalid classic peer public key\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR,
                  SSL_R_UNABLE_TO_FIND_PUBLIC_KEY_PARAMETERS);
         return WORK_ERROR;
@@ -2230,7 +2226,6 @@ WORK_STATE tls_post_process_server_certificate(SSL_CONNECTION *s,
 
     if ((clu = ssl_cert_lookup_by_pkey(pkey, &certidx,
 				       SSL_CONNECTION_GET_CTX(s))) == NULL) {
-        printf("[DUAL_CERT] Unknown classic certificate type\n");
         SSLfatal(s, SSL_AD_ILLEGAL_PARAMETER, SSL_R_UNKNOWN_CERTIFICATE_TYPE);
         return WORK_ERROR;
     }
@@ -2699,7 +2694,6 @@ MSG_PROCESS_RETURN tls_process_key_exchange(SSL_CONNECTION *s, PACKET *pkt)
                         .sig_idx = SSL_PKEY_PQ_FALCON_512
                     };
                     pq_sigalg = &generic_pqc_sigalg;
-                    printf("[DUAL_SIGN] Created generic PQC sigalg for NID %d\n", sig_nid);
                 }
             }
         }
@@ -2736,7 +2730,6 @@ MSG_PROCESS_RETURN tls_process_key_exchange(SSL_CONNECTION *s, PACKET *pkt)
                 EVP_PKEY *pq_pkey = X509_get0_pubkey(pq_cert);
                 if (pq_pkey) {
                     pkey_to_use = pq_pkey;
-                    printf("[DUAL_SIGN] Using PQC public key for verification\n");
                 }
             }
         }

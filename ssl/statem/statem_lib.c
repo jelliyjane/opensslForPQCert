@@ -446,10 +446,8 @@ CON_FUNC_RETURN tls_construct_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
    
 
 }
-
 CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
 {
-
     EVP_PKEY *pq_pkey = NULL;
     EVP_MD_CTX *pq_mctx = EVP_MD_CTX_new();
     EVP_PKEY_CTX *pq_pctx = NULL;
@@ -463,127 +461,49 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
     SSL_CTX *sctx = SSL_CONNECTION_GET_CTX(s);
 
     if (pq_mctx == NULL) {
-        printf("[PQ_CERT] Failed to create MD context\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
     }
 
-    /* Check if dual mode is enabled */
-    if (!s->cert->dual_certs_enabled) {
-        printf("[PQ_CERT] Dual certificate mode not enabled\n");
+    /* Get PQC private key - support both dual mode and PQC-only/composite */
+    if (s->cert->dual_certs_enabled && s->cert->pqkey != NULL && s->cert->pqkey->privatekey != NULL) {
+        /* Dual mode: use pqkey */
+        pq_pkey = s->cert->pqkey->privatekey;
+    } else if (s->cert->key != NULL && s->cert->key->privatekey != NULL) {
+        /* PQC-only or composite: use main key */
+        pq_pkey = s->cert->key->privatekey;
+    } else {
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
     }
 
-    /* Get PQC private key */
-    if (s->cert->pqkey == NULL || s->cert->pqkey->privatekey == NULL) {
-        printf("[PQ_CERT] No PQC private key available\n");
-        SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
-        goto end;
-    }
-    pq_pkey = s->cert->pqkey->privatekey;
-
-    /* Determine PQC signature algorithm based on key type */
-    int pq_key_type = EVP_PKEY_get_id(pq_pkey);
+    /* Determine PQC signature algorithm - use unified selection for all PQC (including composite) */
     const char *key_type_name = EVP_PKEY_get0_type_name(pq_pkey);
+
+    /* Check if this is a composite certificate (contains underscore in name) */
+    int is_composite = (key_type_name != NULL && strchr(key_type_name, '_') != NULL);
     
-    /* Enhanced PQC key type detection for unknown NIDs */
-    if (pq_key_type == -1 && key_type_name != NULL) {
-        if (strstr(key_type_name, "falcon512") != NULL) {
-            pq_key_type = EVP_PKEY_FALCON512;
-        } else if (strstr(key_type_name, "falcon1024") != NULL) {
-            pq_key_type = EVP_PKEY_FALCON1024;
-        } else if (strstr(key_type_name, "mldsa") != NULL || strstr(key_type_name, "MLDSA") != NULL) {
-            if (strstr(key_type_name, "44") != NULL) {
-                pq_key_type = EVP_PKEY_MLDSA_44;
-            } else if (strstr(key_type_name, "65") != NULL) {
-                pq_key_type = EVP_PKEY_MLDSA_65;
-            } else if (strstr(key_type_name, "87") != NULL) {
-                pq_key_type = EVP_PKEY_MLDSA_87;
-            } else {
-                pq_key_type = EVP_PKEY_MLDSA_44; /* Default MLDSA-44 if not specified */
-            }
+    if (is_composite) {
+        /* For composite certificates, use composite signature algorithm selection */
+        if (!tls1_select_composite_sigalg(s, pq_pkey, &pq_sigalg)) {
+            SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
+            goto end;
         }
-    }
-    
-    /* Select appropriate PQC signature algorithm */
-    switch (pq_key_type) {
-        case EVP_PKEY_FALCON512:
-            /* Create SIGALG_LOOKUP for FALCON-512 */
-            static const SIGALG_LOOKUP falcon512_sigalg = {
-                .name = "FALCON-512-SHA256",
-                .sig = EVP_PKEY_FALCON512,
-                .hash = NID_sha256,
-                .sigalg = TLSEXT_SIGALG_falcon512,
-                .hash_idx = SSL_MD_SHA256_IDX,
-                .sig_idx = SSL_PKEY_PQ_FALCON_512
-            };
-            pq_sigalg = &falcon512_sigalg;
-            break;
-            
-        case EVP_PKEY_FALCON1024:
-            /* Create SIGALG_LOOKUP for FALCON-1024 */
-            static const SIGALG_LOOKUP falcon1024_sigalg = {
-                .name = "FALCON-1024-SHA256",
-                .sig = EVP_PKEY_FALCON1024,
-                .hash = NID_sha256,
-                .sigalg = TLSEXT_SIGALG_falcon1024,  /* FALCON-1024 */
-                .hash_idx = SSL_MD_SHA256_IDX,
-                .sig_idx = SSL_PKEY_PQ_FALCON_1024
-            };
-            pq_sigalg = &falcon1024_sigalg;
-            break;
-            
-        
-            
-        case EVP_PKEY_MLDSA_44:
-            static const SIGALG_LOOKUP mldsa44_sigalg = {
-                .name = "MLDSA-44-SHA256",
-                .sig = EVP_PKEY_MLDSA_44,
-                .hash = NID_sha256,
-                .sigalg = TLSEXT_SIGALG_mldsa_44,
-                .hash_idx = SSL_MD_SHA256_IDX,
-                .sig_idx = SSL_PKEY_PQ_MLDSA_44
-            };
-            pq_sigalg = &mldsa44_sigalg;
-            break;
-        case EVP_PKEY_MLDSA_65:
-            static const SIGALG_LOOKUP mldsa65_sigalg = {
-                .name = "MLDSA-65-SHA256",
-                .sig = EVP_PKEY_MLDSA_65,
-                .hash = NID_sha256,
-                .sigalg = TLSEXT_SIGALG_mldsa_65,
-                .hash_idx = SSL_MD_SHA256_IDX,
-                .sig_idx = SSL_PKEY_PQ_MLDSA_65
-            };
-            pq_sigalg = &mldsa65_sigalg;
-            break;
-        case EVP_PKEY_MLDSA_87:
-            static const SIGALG_LOOKUP mldsa87_sigalg = {
-                .name = "MLDSA-65-SHA256",
-                .sig = EVP_PKEY_MLDSA_87,
-                .hash = NID_sha256,
-                .sigalg = TLSEXT_SIGALG_mldsa_87,
-                .hash_idx = SSL_MD_SHA256_IDX,
-                .sig_idx = SSL_PKEY_PQ_MLDSA_87
-            };
-            pq_sigalg = &mldsa87_sigalg;
-            break;
-        default:
-            printf("[PQ_CERT] Unsupported PQC key type: %d\n", pq_key_type);
-            SSLfatal(s, SSL_AD_INSUFFICIENT_SECURITY, SSL_R_NO_SUITABLE_SIGNATURE_ALGORITHM);
-        goto end;
+    } else {
+        /* For pure PQC certificates, use PQC signature algorithm selection */
+        if (!tls1_select_pq_sigalg(s, pq_pkey, &pq_sigalg)) {
+            SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
+            goto end;
+        }
     }
 
     if (pq_sigalg == NULL) {
-        printf("[PQ_CERT] No suitable PQC signature algorithm found\n");
         SSLfatal(s, SSL_AD_INSUFFICIENT_SECURITY, SSL_R_NO_SUITABLE_SIGNATURE_ALGORITHM);
         goto end;
     }
 
     /* Get hash algorithm associated with signature algorithm */
     if (!tls1_lookup_md(sctx, pq_sigalg, &pq_md)) {
-        printf("[PQ_CERT] Failed to get hash algorithm for sigalg\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
     }
@@ -591,14 +511,12 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
     /* Prepare data to sign */
     unsigned char tls13tbs[TLS13_TBS_PREAMBLE_SIZE + EVP_MAX_MD_SIZE];
     if (!get_cert_verify_tbs_data(s, tls13tbs, &hdata, &hdatalen)) {
-        printf("[PQ_CERT] Failed to get cert verify TBS data\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
     }
 
     /* Write PQC signature algorithm */
     if (SSL_USE_SIGALGS(s) && !WPACKET_put_bytes_u16(pkt, pq_sigalg->sigalg)) {
-        printf("[PQ_CERT] Failed to write PQC signature algorithm\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
         goto end;
     }
@@ -608,20 +526,17 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
                               pq_md == NULL ? NULL : EVP_MD_get0_name(pq_md),
                               sctx->libctx, sctx->propq, pq_pkey,
                               NULL) <= 0) {
-        printf("[PQ_CERT] Failed to initialize PQC signature creation\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
     }
 
     if (EVP_DigestSignUpdate(pq_mctx, hdata, hdatalen) <= 0) {
-        printf("[PQ_CERT] Failed to update PQC signature creation\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
     }
 
     /* Get signature length */
     if (EVP_DigestSignFinal(pq_mctx, NULL, &pq_siglen) <= 0) {
-        printf("[PQ_CERT] Failed to get PQC signature length\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
     }
@@ -629,21 +544,18 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
     /* Allocate signature buffer */
     pq_sig = OPENSSL_malloc(pq_siglen);
     if (pq_sig == NULL) {
-        printf("[PQ_CERT] Failed to allocate PQC signature buffer\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
     }
 
     /* Create final signature */
     if (EVP_DigestSignFinal(pq_mctx, pq_sig, &pq_siglen) <= 0) {
-        printf("[PQ_CERT] Failed to create PQC signature\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
     }
 
     /* Write signature to packet */
     if (!WPACKET_sub_memcpy_u16(pkt, pq_sig, pq_siglen)) {
-        printf("[PQ_CERT] Failed to write PQC signature to packet\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
     }
@@ -861,201 +773,89 @@ MSG_PROCESS_RETURN tls_process_pq_certificate_verify(SSL_CONNECTION *s, PACKET *
 
 
     if (pq_mctx == NULL) {
-        printf("[PQ_CERT_VERIFY_PROCESS] ERROR: Failed to create MD context\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
     }
 
-    /* Check if dual mode is enabled */
-    if (!s->session->dual_certs_enabled) {
-        printf("[PQ_CERT_VERIFY_PROCESS] ERROR: Dual certificate mode not enabled\n");
-        SSLfatal(s, SSL_AD_UNEXPECTED_MESSAGE, SSL_R_UNEXPECTED_MESSAGE);
-        goto end;
+    /* Get PQC public key - support both dual mode and PQC-only/composite */
+    if (s->session != NULL && s->session->dual_certs_enabled && 
+        s->session->peer_pqc_chain != NULL && 
+        sk_X509_num(s->session->peer_pqc_chain) > 0) {
+        /* Dual mode: use PQC chain from session */
+        X509 *pq_cert = sk_X509_value(s->session->peer_pqc_chain, 0);
+        if (pq_cert != NULL) {
+            pq_pkey = X509_get_pubkey(pq_cert);
+        }
     }
-
-    /* Get PQC public key from session */
-    if (s->session == NULL || s->session->peer_pqc_chain == NULL || 
-        sk_X509_num(s->session->peer_pqc_chain) == 0) {
-        printf("[PQ_CERT_VERIFY_PROCESS] ERROR: No PQC certificate chain available\n");
-        SSLfatal(s, SSL_AD_UNEXPECTED_MESSAGE, SSL_R_UNEXPECTED_MESSAGE);
-        goto end;
+    
+    /* If not dual mode or no PQC chain, try to get PQC key from main certificate */
+    if (pq_pkey == NULL && s->session != NULL && s->session->peer != NULL) {
+        EVP_PKEY *peer_pkey = X509_get0_pubkey(s->session->peer);
+        if (peer_pkey != NULL) {
+            const char *key_type_name = EVP_PKEY_get0_type_name(peer_pkey);
+            /* Check if this is a PQC certificate (pure or composite) */
+            if (key_type_name != NULL && is_pqc_only_certificate(s)) {
+                pq_pkey = X509_get_pubkey(s->session->peer);
+            }
+        }
     }
-
-    /* Get main PQC certificate */
-    X509 *pq_cert = sk_X509_value(s->session->peer_pqc_chain, 0);
-    if (pq_cert == NULL) {
-        printf("[PQ_CERT_VERIFY_PROCESS] ERROR: No PQC certificate available\n");
-        SSLfatal(s, SSL_AD_UNEXPECTED_MESSAGE, SSL_R_UNEXPECTED_MESSAGE);
-        goto end;
-    }
-
-    /* Extract PQC public key */
-    pq_pkey = X509_get_pubkey(pq_cert);
+    
     if (pq_pkey == NULL) {
-        printf("[PQ_CERT_VERIFY_PROCESS] ERROR: Failed to get PQC public key\n");
-        SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
+        SSLfatal(s, SSL_AD_UNEXPECTED_MESSAGE, SSL_R_UNEXPECTED_MESSAGE);
         goto end;
     }
 
-
-
-    /* Parser l'algorithme de signature PQC */
+    /* Parse signature algorithm - use unified selection for all PQC (including composite) */
     if (SSL_USE_SIGALGS(s)) {
         if (!PACKET_get_net_2(pkt, &sigalg)) {
-            printf("[PQ_CERT_VERIFY_PROCESS] ERROR: Failed to parse PQC signature algorithm\n");
             SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_BAD_PACKET);
             goto end;
         }
 
-        
         /* Verify signature algorithm */
         if (tls12_check_peer_sigalg(s, sigalg, pq_pkey) <= 0) {
-            printf("[PQ_CERT_VERIFY_PROCESS] ERROR: Invalid PQC signature algorithm\n");
             /* SSLfatal() already called */
             goto end;
         }
         
-        /* Determine PQC signature algorithm based on key type */
-        int pq_key_type = EVP_PKEY_get_id(pq_pkey);
-        const char *key_type_name = EVP_PKEY_get0_type_name(pq_pkey);
-
+        /* Use the signature algorithm received from the peer, not re-select */
+        pq_sigalg_to_use = tls1_lookup_sigalg_any(s, sigalg);
         
-        /* Enhanced PQC key type detection for unknown NIDs */
-        if (pq_key_type == -1 && key_type_name != NULL) {
-
-            if (strstr(key_type_name, "falcon512") != NULL) {
-                pq_key_type = EVP_PKEY_FALCON512;
-
-            } else if (strstr(key_type_name, "falcon1024") != NULL) {
-                pq_key_type = EVP_PKEY_FALCON1024;
-            } else if (strstr(key_type_name, "mldsa") != NULL || strstr(key_type_name, "MLDSA") != NULL) {
-                if (strstr(key_type_name, "44") != NULL) {
-                    pq_key_type = EVP_PKEY_MLDSA_44;
-
-                } else if (strstr(key_type_name, "65") != NULL) {
-                    pq_key_type = EVP_PKEY_MLDSA_65;
-                } else if (strstr(key_type_name, "87") != NULL) {
-                    pq_key_type = EVP_PKEY_MLDSA_87;
-
-                } else {
-                    pq_key_type = EVP_PKEY_MLDSA_44; /* Default MLDSA-44 if not specified */
-
-                }
-            }
-        }
-        
-        /* Select appropriate PQC signature algorithm */
-        switch (pq_key_type) {
-            case EVP_PKEY_FALCON512:
-                /* Create SIGALG_LOOKUP for FALCON-512 */
-                static const SIGALG_LOOKUP falcon512_sigalg = {
-                    .name = "FALCON-512-SHA256",
-                    .sig = EVP_PKEY_FALCON512,
-                    .hash = NID_sha256,
-                    .sigalg = TLSEXT_SIGALG_falcon512,  /* FALCON-512 */
-                    .hash_idx = SSL_MD_SHA256_IDX,
-                    .sig_idx = SSL_PKEY_PQ_FALCON_512
-                };
-                pq_sigalg_to_use = &falcon512_sigalg;
-                break;
-                
-            case EVP_PKEY_FALCON1024:
-                /* Create SIGALG_LOOKUP for FALCON-1024 */
-                static const SIGALG_LOOKUP falcon1024_sigalg = {
-                    .name = "FALCON-1024-SHA256",
-                    .sig = EVP_PKEY_FALCON1024,
-                    .hash = NID_sha256,
-                    .sigalg = TLSEXT_SIGALG_falcon1024,  /* FALCON-1024 */
-                    .hash_idx = SSL_MD_SHA256_IDX,
-                    .sig_idx = SSL_PKEY_PQ_FALCON_1024
-                };
-                pq_sigalg_to_use = &falcon1024_sigalg;
-                break;
-            case EVP_PKEY_MLDSA_44:
-                static const SIGALG_LOOKUP mldsa44_sigalg = {
-                    .name = "MLDSA-44-SHA256",
-                    .sig = EVP_PKEY_MLDSA_44,
-                    .hash = NID_sha256,
-                    .sigalg = TLSEXT_SIGALG_mldsa_44,
-                    .hash_idx = SSL_MD_SHA256_IDX,
-                    .sig_idx = SSL_PKEY_PQ_MLDSA_44
-                };
-                pq_sigalg_to_use = &mldsa44_sigalg;
-                break;
-            case EVP_PKEY_MLDSA_65:
-                static const SIGALG_LOOKUP mldsa65_sigalg = {
-                    .name = "MLDSA-65-SHA256",
-                    .sig = EVP_PKEY_MLDSA_65,
-                    .hash = NID_sha256,
-                    .sigalg = TLSEXT_SIGALG_mldsa_65,
-                    .hash_idx = SSL_MD_SHA256_IDX,
-                    .sig_idx = SSL_PKEY_PQ_MLDSA_65
-                };
-                pq_sigalg_to_use = &mldsa65_sigalg;
-                break;
-            case EVP_PKEY_MLDSA_87:
-                static const SIGALG_LOOKUP mldsa87_sigalg = {
-                    .name = "MLDSA-87-SHA256",
-                    .sig = EVP_PKEY_MLDSA_87,
-                    .hash = NID_sha256,
-                    .sigalg = TLSEXT_SIGALG_mldsa_87,
-                    .hash_idx = SSL_MD_SHA256_IDX,
-                    .sig_idx = SSL_PKEY_PQ_MLDSA_87
-                };
-                pq_sigalg_to_use = &mldsa87_sigalg;
-                break;    
-            default:
-                printf("[PQ_CERT_VERIFY_PROCESS] ERROR: Unsupported PQC key type: %d\n", pq_key_type);
-                SSLfatal(s, SSL_AD_INSUFFICIENT_SECURITY, SSL_R_NO_SUITABLE_SIGNATURE_ALGORITHM);
+        if (pq_sigalg_to_use == NULL) {
+            SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
             goto end;
         }
-        
-
     } else {
-        /* Use default algorithm based on key type */
-
-        /* For now, we'll use a default approach since tls1_get_legacy_sigalg is not accessible */
+        /* Legacy mode not supported for PQC */
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
     }
 
     if (pq_sigalg_to_use == NULL) {
-        printf("[PQ_CERT_VERIFY_PROCESS] ERROR: No suitable PQC signature algorithm found\n");
         SSLfatal(s, SSL_AD_INSUFFICIENT_SECURITY, SSL_R_NO_SUITABLE_SIGNATURE_ALGORITHM);
         goto end;
     }
 
-
-
     /* Get hash algorithm associated with signature algorithm */
     if (!tls1_lookup_md(sctx, pq_sigalg_to_use, &pq_md)) {
-        printf("[PQ_CERT_VERIFY_PROCESS] ERROR: Failed to get hash algorithm for sigalg\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
     }
 
-
-
-    /* Parser la signature PQC */
+    /* Parse PQC signature */
     if (!PACKET_get_length_prefixed_2(pkt, &pq_sig_pkt)) {
-        printf("[PQ_CERT_VERIFY_PROCESS] ERROR: Failed to parse PQC signature length\n");
         SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_BAD_SIGNATURE);
         goto end;
     }
 
     pq_siglen = PACKET_remaining(&pq_sig_pkt);
     if (!PACKET_get_bytes(&pq_sig_pkt, &pq_sig, pq_siglen)) {
-        printf("[PQ_CERT_VERIFY_PROCESS] ERROR: Failed to get PQC signature bytes\n");
         SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_BAD_SIGNATURE);
         goto end;
     }
 
-
-
     /* Prepare data to sign */
-
     if (!get_cert_verify_tbs_data(s, tls13tbs, &hdata, &hdatalen)) {
-        printf("[PQ_CERT_VERIFY_PROCESS] ERROR: Failed to get cert verify TBS data\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
     }
@@ -1065,17 +865,12 @@ MSG_PROCESS_RETURN tls_process_pq_certificate_verify(SSL_CONNECTION *s, PACKET *
                                 pq_md == NULL ? NULL : EVP_MD_get0_name(pq_md),
                                 sctx->libctx, sctx->propq, pq_pkey,
                                 NULL) <= 0) {
-        printf("[PQ_CERT_VERIFY_PROCESS] ERROR: Failed to initialize PQC signature verification\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
     }
 
-
-    
     /* For PQ algorithms, use EVP_DigestVerify instead of streaming approach */
     if (EVP_DigestVerify(pq_mctx, (unsigned char *)pq_sig, pq_siglen, hdata, hdatalen) <= 0) {
-        printf("[PQ_CERT_VERIFY_PROCESS] ERROR: PQC signature verification failed\n");
-        printf("[PQ_CERT_VERIFY_PROCESS] Error details: %s\n", ERR_error_string(ERR_get_error(), NULL));
         SSLfatal(s, SSL_AD_BAD_CERTIFICATE, SSL_R_BAD_SIGNATURE);
         goto end;
     }
@@ -1461,14 +1256,12 @@ static int ssl_add_cert_to_wpacket(SSL_CONNECTION *s, WPACKET *pkt,
     len = i2d_X509(x, NULL);
 
     if (len < 0) {
-        printf("[CLASSIC_CERT_ENCODE] ERROR: Failed to get certificate DER length\n");
         if (!for_comp)
             SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_BUF_LIB);
         return 0;
     }
     if (!WPACKET_sub_allocate_bytes_u24(pkt, len, &outbytes)
             || i2d_X509(x, &outbytes) != len) {
-        printf("[CLASSIC_CERT_ENCODE] ERROR: Failed to write certificate to packet\n");
         if (!for_comp)
             SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
         return 0;
@@ -1477,7 +1270,6 @@ static int ssl_add_cert_to_wpacket(SSL_CONNECTION *s, WPACKET *pkt,
 
     if ((SSL_CONNECTION_IS_TLS13(s) || for_comp)
             && !tls_construct_extensions(s, pkt, context, x, chain)) {
-        printf("[CLASSIC_CERT_ENCODE] ERROR: Failed to construct certificate extensions\n");
         /* SSLfatal() already called */
         return 0;
     }
@@ -1566,7 +1358,6 @@ int ssl_add_cert_chain(SSL_CONNECTION *s, WPACKET *pkt, CERT_PKEY *cpk, int for_
                                                        sctx->propq);
 
         if (xs_ctx == NULL) {
-            printf("[CLASSIC_CERT_ENCODE] ERROR: Failed to create X509_STORE_CTX\n");
             if (!for_comp)
                 SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_X509_LIB);
             return 0;
@@ -1607,7 +1398,6 @@ int ssl_add_cert_chain(SSL_CONNECTION *s, WPACKET *pkt, CERT_PKEY *cpk, int for_
 
 
             if (!ssl_add_cert_to_wpacket(s, pkt, x, i, for_comp)) {
-                printf("[CLASSIC_CERT_ENCODE] ERROR: Failed to add certificate %d to packet\n", i);
                 /* SSLfatal() already called */
                 X509_STORE_CTX_free(xs_ctx);
                 return 0;
@@ -1618,14 +1408,12 @@ int ssl_add_cert_chain(SSL_CONNECTION *s, WPACKET *pkt, CERT_PKEY *cpk, int for_
 
         i = ssl_security_cert_chain(s, extra_certs, x, 0);
         if (i != 1) {
-            printf("[CLASSIC_CERT_ENCODE] ERROR: Security check failed for certificate chain\n");
             if (!for_comp)
                 SSLfatal(s, SSL_AD_INTERNAL_ERROR, i);
             return 0;
         }
 
         if (!ssl_add_cert_to_wpacket(s, pkt, x, 0, for_comp)) {
-            printf("[CLASSIC_CERT_ENCODE] ERROR: Failed to add main certificate to packet\n");
             /* SSLfatal() already called */
             return 0;
         }
@@ -1634,7 +1422,6 @@ int ssl_add_cert_chain(SSL_CONNECTION *s, WPACKET *pkt, CERT_PKEY *cpk, int for_
             x = sk_X509_value(extra_certs, i);
 
             if (!ssl_add_cert_to_wpacket(s, pkt, x, i + 1, for_comp)) {
-                printf("[CLASSIC_CERT_ENCODE] ERROR: Failed to add extra certificate %d to packet\n", i);
                 /* SSLfatal() already called */
                 return 0;
             }
@@ -3575,7 +3362,6 @@ int ssl_add_pqc_cert_chain_ietf_format(SSL_CONNECTION *s, WPACKET *pkt, CERT_PKE
 
     
     if (cpk == NULL || cpk->x509 == NULL) {
-        printf("[PQ_CERT_IETF] ERROR: No PQC certificate available\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
         return 0;
     }
@@ -3591,7 +3377,6 @@ int ssl_add_pqc_cert_chain_ietf_format(SSL_CONNECTION *s, WPACKET *pkt, CERT_PKE
     
     /* First, write the length of the entire PQC certificate chain (3 bytes) */
     if (!WPACKET_start_sub_packet_u24(pkt)) {
-        printf("[PQ_CERT_IETF] ERROR: Failed to start PQC certificate chain length\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
         return 0;
     }
@@ -3601,7 +3386,6 @@ int ssl_add_pqc_cert_chain_ietf_format(SSL_CONNECTION *s, WPACKET *pkt, CERT_PKE
     der = NULL; /* Initialize der to NULL */
     derlen = i2d_X509(x, &der);
     if (derlen < 0 || der == NULL) {
-        printf("[PQ_CERT_IETF] ERROR: Failed to encode PQC end-entity certificate\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_ASN1_LIB);
         return 0;
     }
@@ -3611,7 +3395,6 @@ int ssl_add_pqc_cert_chain_ietf_format(SSL_CONNECTION *s, WPACKET *pkt, CERT_PKE
     /* Write certificate length (3 bytes) and data */
     if (!WPACKET_put_bytes_u24(pkt, derlen) ||
         !WPACKET_memcpy(pkt, der, derlen)) {
-        printf("[PQ_CERT_IETF] ERROR: Failed to write PQC end-entity certificate\n");
         OPENSSL_free(der);
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
         return 0;
@@ -3624,14 +3407,12 @@ int ssl_add_pqc_cert_chain_ietf_format(SSL_CONNECTION *s, WPACKET *pkt, CERT_PKE
         for (j = 0; j < sk_X509_num(chain); j++) {
             x = sk_X509_value(chain, j);
             if (x == NULL) {
-                printf("[PQ_CERT_IETF] ERROR: PQC chain certificate %zu is NULL\n", j);
                 SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
                 return 0;
             }
             der = NULL; /* Reset der to NULL before each iteration */
             derlen = i2d_X509(x, &der);
             if (derlen < 0 || der == NULL) {
-                printf("[PQ_CERT_IETF] ERROR: Failed to encode PQC chain certificate %zu\n", j);
                 SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_ASN1_LIB);
                 return 0;
             }
@@ -3641,7 +3422,6 @@ int ssl_add_pqc_cert_chain_ietf_format(SSL_CONNECTION *s, WPACKET *pkt, CERT_PKE
             /* Write certificate length (3 bytes) and data */
             if (!WPACKET_put_bytes_u24(pkt, derlen) ||
                 !WPACKET_memcpy(pkt, der, derlen)) {
-                printf("[PQ_CERT_IETF] ERROR: Failed to write PQC chain certificate %zu\n", j);
                 OPENSSL_free(der);
                 SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
                 return 0;
@@ -3653,7 +3433,6 @@ int ssl_add_pqc_cert_chain_ietf_format(SSL_CONNECTION *s, WPACKET *pkt, CERT_PKE
     
     /* Close the PQC certificate chain length sub-packet */
     if (!WPACKET_close(pkt)) {
-        printf("[PQ_CERT_IETF] ERROR: Failed to close PQC certificate chain length\n");
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
         return 0;
     }
@@ -3799,4 +3578,3 @@ int construct_pq_ca_names(SSL_CONNECTION *s, const STACK_OF(X509_NAME) *ca_sk,
 
     return 1;
 }
-

@@ -8217,6 +8217,10 @@ KEY_TYPE get_key_type_from_evp_pkey(const EVP_PKEY *pkey) {
                             result = KEY_TYPE_FALCON; /* Default to FALCON for unknown types */
                         }
                     }
+                    /* Pattern: classical_pqc or pqc_classical */
+                    if (strstr(key_type_name, "_mldsa") != NULL || strstr(key_type_name, "_falcon") != NULL || strstr(key_type_name, "_sphincs") != NULL ||strstr(key_type_name, "mldsa_") != NULL || strstr(key_type_name, "falcon_") != NULL || strstr(key_type_name, "sphincs_") != NULL || strstr(key_type_name, "p256_") != NULL || strstr(key_type_name, "p384_") != NULL || strstr(key_type_name, "p521_") != NULL || strstr(key_type_name, "rsa") != NULL || strstr(key_type_name, "ed25519") != NULL || strstr(key_type_name, "ed448") != NULL || strstr(key_type_name, "bp256") != NULL || strstr(key_type_name, "bp384") != NULL) {
+                    return KEY_TYPE_COMPOSITE;
+                    }
                 } else {
                     /* Size-based detection when no name available */
                     if (key_size >= 800 && key_size <= 1200) {

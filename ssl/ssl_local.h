@@ -2323,6 +2323,61 @@ typedef enum downgrade_en {
 #define TLSEXT_SIGALG_mldsa_65                                  0x090A
 #define TLSEXT_SIGALG_mldsa_87                                  0x090B
 
+/* Composite signature algorithms */
+#define TLSEXT_SIGALG_mldsa44_p256                              0x090C
+#define TLSEXT_SIGALG_mldsa44_rsa                               0x090D
+#define TLSEXT_SIGALG_mldsa44_ed25519                           0x090E
+#define TLSEXT_SIGALG_mldsa44                                   0x090F
+#define TLSEXT_SIGALG_falcon512_p256                            0x0910
+#define TLSEXT_SIGALG_falcon512_rsa                             0x0911
+#define TLSEXT_SIGALG_sphincs_p256                              0x0912
+#define TLSEXT_SIGALG_sphincs_rsa                               0x0913
+
+/* ML-DSA65 composite algorithms */
+#define TLSEXT_SIGALG_mldsa65_p384                              0x0914
+#define TLSEXT_SIGALG_mldsa65_pss3072                           0x0915
+#define TLSEXT_SIGALG_mldsa65_rsa3072                           0x0916
+#define TLSEXT_SIGALG_mldsa65_p256                              0x0917
+#define TLSEXT_SIGALG_mldsa65                                   0x0918
+
+/* ML-DSA87 composite algorithms */
+#define TLSEXT_SIGALG_mldsa87_p521                              0x0919
+#define TLSEXT_SIGALG_mldsa87_p384                              0x091A
+#define TLSEXT_SIGALG_mldsa87                                   0x091B
+
+/* Falcon512 padded composite algorithms */
+#define TLSEXT_SIGALG_falconpadded512_p256                      0x091C
+#define TLSEXT_SIGALG_falconpadded512_rsa3072                   0x091D
+#define TLSEXT_SIGALG_falconpadded512                           0x091E
+
+/* Falcon1024 composite algorithms */
+#define TLSEXT_SIGALG_falcon1024_p521                           0x092F
+#define TLSEXT_SIGALG_falcon1024_composite                      0x0930
+
+/* Falcon1024 padded composite algorithms */
+#define TLSEXT_SIGALG_falconpadded1024_p521                     0x0931
+#define TLSEXT_SIGALG_falconpadded1024                          0x0932
+
+/* SPHINCS-SHA2-128s-simple composite algorithms */
+#define TLSEXT_SIGALG_sphincssha2128ssimple_p256                0x0923
+#define TLSEXT_SIGALG_sphincssha2128ssimple_rsa3072             0x0924
+#define TLSEXT_SIGALG_sphincssha2128ssimple                     0x0925
+
+/* SPHINCS-SHA2-192f-simple composite algorithms */
+#define TLSEXT_SIGALG_sphincssha2192fsimple_p384                0x0926
+#define TLSEXT_SIGALG_sphincssha2192fsimple                      0x0927
+
+/* SPHINCS-SHAKE-128f-simple composite algorithms */
+#define TLSEXT_SIGALG_sphincsshake128fsimple_p256               0x0928
+#define TLSEXT_SIGALG_sphincsshake128fsimple_rsa3072            0x0929
+#define TLSEXT_SIGALG_sphincsshake128fsimple                    0x092A
+
+/* SPHINCS-SHA2-128f-simple composite algorithms */
+#define TLSEXT_SIGALG_sphincssha2128fsimple_p256               0x0933
+#define TLSEXT_SIGALG_sphincssha2128fsimple_rsa3072            0x0934
+#define TLSEXT_SIGALG_sphincssha2128fsimple                    0x0935
+
+
 /* RelatedCertificate extension */
 #define TLSEXT_TYPE_related_certificate                         0x0011  
 /* Known PSK key exchange modes */
@@ -3225,7 +3280,7 @@ typedef enum {
     KEY_TYPE_FALCON,
     KEY_TYPE_SPHINCS,
     KEY_TYPE_MLDSA,
-    // ... autres types si besoin
+    KEY_TYPE_COMPOSITE, 
 } KEY_TYPE;
 
 KEY_TYPE get_key_type_from_evp_pkey(const EVP_PKEY *pkey);
@@ -3251,6 +3306,14 @@ typedef struct dual_validation_ctx_st {
 
 int validate_pq_certificate(DUAL_VALIDATION_CTX *ctx);
 int validate_pq_certificate_chain(DUAL_VALIDATION_CTX *ctx);
+
+int is_composite_certificate(SSL_CONNECTION *s);
+int is_pqc_only_certificate(SSL_CONNECTION *s);
+int tls1_select_composite_sigalg(SSL_CONNECTION *s, EVP_PKEY *composite_pkey, 
+                                 const SIGALG_LOOKUP **sigalg);
+int tls1_select_pq_sigalg(SSL_CONNECTION *s, EVP_PKEY *pq_pkey, 
+                          const SIGALG_LOOKUP **sigalg);
+const SIGALG_LOOKUP *tls1_lookup_sigalg_any(const SSL_CONNECTION *s, uint16_t sigalg);
 
 /* RelatedCertificate extension callbacks */
 int add_related_certificate_cb(SSL *s, unsigned int ext_type,

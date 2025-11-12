@@ -123,6 +123,18 @@ const char *SSL_state_string_long(const SSL *s)
         return "TLSv1.3 write end of early data";
     case TLS_ST_SR_END_OF_EARLY_DATA:
         return "TLSv1.3 read end of early data";
+    case TLS_ST_SW_PQ_CERT_VRFY:
+        return "TLSv1.3 write server PQ certificate verify";
+    case TLS_ST_CR_PQ_CERT_VRFY:
+        return "TLSv1.3 read server PQ certificate verify";
+    case TLS_ST_SW_COMPOSITE_CERT_VRFY:
+        return "TLSv1.3 write server composite certificate verify";
+    case TLS_ST_CR_COMPOSITE_CERT_VRFY:
+        return "TLSv1.3 read server composite certificate verify";
+    case TLS_ST_SW_PQ_ONLY_CERT_VRFY:
+        return "TLSv1.3 write server PQ-only certificate verify";
+    case TLS_ST_CR_PQ_ONLY_CERT_VRFY:
+        return "TLSv1.3 read server PQ-only certificate verify";
     default:
         return "unknown state";
     }
@@ -240,6 +252,18 @@ const char *SSL_state_string(const SSL *s)
         return "TWEOED";
     case TLS_ST_SR_END_OF_EARLY_DATA:
         return "TWEOED";
+    case TLS_ST_SW_PQ_CERT_VRFY:
+        return "TWSPCV";
+    case TLS_ST_CR_PQ_CERT_VRFY:
+        return "TRSPCV";
+    case TLS_ST_SW_COMPOSITE_CERT_VRFY:
+        return "TWSCCV";
+    case TLS_ST_CR_COMPOSITE_CERT_VRFY:
+        return "TRSCCV";
+    case TLS_ST_SW_PQ_ONLY_CERT_VRFY:
+        return "TWSPOCV";
+    case TLS_ST_CR_PQ_ONLY_CERT_VRFY:
+        return "TRSPOCV";
     default:
         return "UNKWN";
     }

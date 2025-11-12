@@ -542,18 +542,33 @@ static WRITE_TRAN ossl_statem_server13_write_transition(SSL_CONNECTION *s)
 
     case TLS_ST_SW_COMP_CERT:
     case TLS_ST_SW_CERT:
-        st->hand_state = TLS_ST_SW_CERT_VRFY;
-        return WRITE_TRAN_CONTINUE;
-
-    case TLS_ST_SW_CERT_VRFY:
-        /* Check if dual certificates are enabled and we need to send PQ certificate verify */
+        /* Check certificate type before transitioning */
         if (s->cert->dual_certs_enabled) {
-            /* Transition to TLS_ST_SW_PQ_CERT_VRFY (dual_certs_enabled) */
+            /* Dual mode: send classic CertificateVerify first, then PQ */
+            st->hand_state = TLS_ST_SW_CERT_VRFY;
+            return WRITE_TRAN_CONTINUE;
+        } else if (is_pqc_only_certificate(s)) {
+            /* PQC-only or composite: skip classic CertificateVerify, go directly to PQ */
             st->hand_state = TLS_ST_SW_PQ_CERT_VRFY;
             return WRITE_TRAN_CONTINUE;
+        } else {
+            /* Standard certificates: send classic CertificateVerify */
+            st->hand_state = TLS_ST_SW_CERT_VRFY;
+            return WRITE_TRAN_CONTINUE;
         }
-        st->hand_state = TLS_ST_SW_FINISHED;
-        return WRITE_TRAN_CONTINUE;
+
+    case TLS_ST_SW_CERT_VRFY:
+        /* This state is only reached for dual mode or classic certificates */
+        /* After sending classic CertificateVerify, check if we need to send PQ */
+        if (s->cert->dual_certs_enabled) {
+            /* Dual mode: transition to send PQ CertificateVerify */
+            st->hand_state = TLS_ST_SW_PQ_CERT_VRFY;
+            return WRITE_TRAN_CONTINUE;
+        } else {
+            /* Standard certificates: go to Finished */
+            st->hand_state = TLS_ST_SW_FINISHED;
+            return WRITE_TRAN_CONTINUE;
+        }
 
     case TLS_ST_SW_PQ_CERT_VRFY:
         st->hand_state = TLS_ST_SW_FINISHED;
@@ -1155,7 +1170,9 @@ int ossl_statem_server_construct_message(SSL_CONNECTION *s,
 
     case TLS_ST_SW_PQ_CERT_VRFY:
         /* Call to tls_construct_pq_cert_verify (state TLS_ST_SW_PQ_CERT_VRFY) */
+        /* Handles both dual mode and PQC-only/composite certificates */
         *confunc = tls_construct_pq_cert_verify;
+        /* Use PQ_CERTIFICATE_VERIFY for all PQC cases (dual and PQC-only/composite) */
         *mt = SSL3_MT_PQ_CERTIFICATE_VERIFY;
         break;
 
