@@ -77,6 +77,9 @@ static int tls12_sigalg_allowed(const SSL_CONNECTION *s, int op, const SIGALG_LO
 int tls1_get_pq_security_bits(uint16_t sigalg);
 static const SIGALG_LOOKUP *tls1_lookup_pq_sigalg(const SSL_CONNECTION *s,
                                                    uint16_t sigalg);
+static const SIGALG_LOOKUP *tls1_lookup_composite_sigalg(const SSL_CONNECTION *s,
+                                                         uint16_t sigalg);
+static int is_composite_sigalg(uint16_t sigalg);
 static const SIGALG_LOOKUP *tls1_select_enhanced_pq_sigalg(SSL_CONNECTION *s,
                                                            const EVP_PKEY *pq_pkey,
                                                            const uint16_t *peer_pq_sigs,
@@ -2001,6 +2004,20 @@ int tls12_check_peer_sigalg(SSL_CONNECTION *s, uint16_t sig, EVP_PKEY *pkey)
         }
     }
     
+    /* Enhanced composite signature algorithm detection - same logic as PQ */
+    if (lu == NULL || (sig >= 0x090C && sig <= 0x09FF)) {
+        const SIGALG_LOOKUP *composite_lu = tls1_lookup_composite_sigalg(s, sig);
+        if (composite_lu != NULL) {
+            lu = composite_lu;
+            /* For composite algorithms, we need to handle the key type differently */
+            if (pkeyid == EVP_PKEY_KEYMGMT || pkeyid == -1) {
+                /* Composite algorithms contain both classical and PQ components */
+                /* The key type is determined by the composite algorithm itself */
+                /* No specific mapping needed as composite keys are handled specially */
+            }
+        }
+    }
+    
     /* if this sigalg is loaded, set so far unknown pkeyid to its sig NID */
     if ((pkeyid == EVP_PKEY_KEYMGMT) && (lu != NULL))
         pkeyid = lu->sig;
@@ -2020,14 +2037,16 @@ int tls12_check_peer_sigalg(SSL_CONNECTION *s, uint16_t sig, EVP_PKEY *pkey)
         || (pkeyid != lu->sig
         && (lu->sig != EVP_PKEY_RSA_PSS || pkeyid != EVP_PKEY_RSA)
         && !(lu->sigalg >= 0x0401 && lu->sigalg <= 0x040A)  /* Allow PQ algorithms 0x04xx */
-                    && !(lu->sigalg >= TLSEXT_SIGALG_falcon512 && lu->sigalg <= TLSEXT_SIGALG_mldsa_87))) { /* Allow PQ algorithms 0x09xx */
+                    && !(lu->sigalg >= TLSEXT_SIGALG_falcon512 && lu->sigalg <= TLSEXT_SIGALG_mldsa_87)  /* Allow PQ algorithms 0x09xx */
+                    && !(lu->sigalg >= 0x090C && lu->sigalg <= 0x09FF))) { /* Allow composite algorithms 0x090C-0x09FF */
         SSLfatal(s, SSL_AD_ILLEGAL_PARAMETER, SSL_R_WRONG_SIGNATURE_TYPE);
         return 0;
     }
     /* Check the sigalg is consistent with the key OID */
-    /* Skip this check for PQ algorithms as they may not be in the standard cert lookup table */
+    /* Skip this check for PQ and composite algorithms as they may not be in the standard cert lookup table */
     if (!(lu->sigalg >= 0x0401 && lu->sigalg <= 0x040A) && 
-                    !(lu->sigalg >= TLSEXT_SIGALG_falcon512 && lu->sigalg <= TLSEXT_SIGALG_mldsa_87)) {
+                    !(lu->sigalg >= TLSEXT_SIGALG_falcon512 && lu->sigalg <= TLSEXT_SIGALG_mldsa_87) &&
+                    !(lu->sigalg >= 0x090C && lu->sigalg <= 0x09FF)) {
         if (!ssl_cert_lookup_by_nid(
                      (pkeyid == EVP_PKEY_RSA_PSS) ? EVP_PKEY_get_id(pkey) : pkeyid,
                      &cidx, SSL_CONNECTION_GET_CTX(s))
@@ -2117,11 +2136,30 @@ int tls12_check_peer_sigalg(SSL_CONNECTION *s, uint16_t sig, EVP_PKEY *pkey)
         }
     }
     
-    /* Allow fallback to SHA1 if not strict mode (but not for PQ algorithms) */
+    /* Enhanced check for composite algorithms - same logic as PQ */
+    if (i == sent_sigslen && (sig >= 0x090C && sig <= 0x09FF)) {
+        /* Try composite signature algorithms if not found in classic or PQ algorithms */
+        /* Check if composite algorithm is in configured list */
+        if (s->cert->dual_conf_sigalgs != NULL) {
+            size_t found = 0;
+            for (size_t j = 0; j < s->cert->dual_conf_sigalgslen; j++) {
+                if (sig == s->cert->dual_conf_sigalgs[j] && is_composite_sigalg(sig)) {
+                    found = 1;
+                    break;
+                }
+            }
+            if (found) {
+                i = 0; /* Found, set i to indicate match (similar to PQ logic) */
+            }
+        }
+    }
+    
+    /* Allow fallback to SHA1 if not strict mode (but not for PQ or composite algorithms) */
     if (i == sent_sigslen && (lu->hash != NID_sha1
         || s->cert->cert_flags & SSL_CERT_FLAGS_CHECK_TLS_STRICT)
         && !(lu->sigalg >= 0x0401 && lu->sigalg <= 0x040A)  /* Don't allow fallback for PQ 0x04xx */
-                    && !(lu->sigalg >= TLSEXT_SIGALG_falcon512 && lu->sigalg <= TLSEXT_SIGALG_mldsa_87)) { /* Don't allow fallback for PQ 0x09xx */
+                    && !(lu->sigalg >= TLSEXT_SIGALG_falcon512 && lu->sigalg <= TLSEXT_SIGALG_mldsa_87)  /* Don't allow fallback for PQ 0x09xx */
+                    && !(lu->sigalg >= 0x090C && lu->sigalg <= 0x09FF)) { /* Don't allow fallback for composite 0x090C-0x09FF */
         SSLfatal(s, SSL_AD_HANDSHAKE_FAILURE, SSL_R_WRONG_SIGNATURE_TYPE);
         return 0;
     }
@@ -2137,12 +2175,15 @@ int tls12_check_peer_sigalg(SSL_CONNECTION *s, uint16_t sig, EVP_PKEY *pkey)
     sigalgstr[0] = (sig >> 8) & 0xff;
     sigalgstr[1] = sig & 0xff;
     
-    /* Enhanced security check for PQ algorithms */
+    /* Enhanced security check for PQ and composite algorithms */
     if (lu->sigalg >= 0x0401 && lu->sigalg <= 0x040A) {
         /* For PQ algorithms (0x04xx), use tls1_get_pq_security_bits */
         secbits = tls1_get_pq_security_bits(lu->sigalg);
-            } else if (lu->sigalg >= TLSEXT_SIGALG_falcon512 && lu->sigalg <= TLSEXT_SIGALG_mldsa_65) {
+    } else if (lu->sigalg >= TLSEXT_SIGALG_falcon512 && lu->sigalg <= TLSEXT_SIGALG_mldsa_65) {
         /* For PQ algorithms (0x09xx), use tls1_get_pq_security_bits */
+        secbits = tls1_get_pq_security_bits(lu->sigalg);
+    } else if (lu->sigalg >= 0x090C && lu->sigalg <= 0x09FF) {
+        /* For composite algorithms (0x090C-0x09FF), use tls1_get_pq_security_bits */
         secbits = tls1_get_pq_security_bits(lu->sigalg);
     } else {
         /* For classical algorithms, use sigalg_security_bits */
