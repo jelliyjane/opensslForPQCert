@@ -23,6 +23,7 @@
 #include <openssl/encoder.h>
 
 #include <openssl/v3_dcd.h>
+#include <openssl/x509v3.h>
 
 /*
  * Map error codes to TLS/SSL alart types.
@@ -804,17 +805,22 @@ MSG_PROCESS_RETURN tls_process_pq_cert_verify(SSL_CONNECTION *s, PACKET *pkt)
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_EVP_LIB);
         goto err;
     }
-
+    printf("tls_get_peer_delta_pkey start\n");
     pkey = tls_get_peer_delta_pkey(s);
-    /* print delta certificate public key
-    BIO *out = BIO_new_fp(stdout, BIO_NOCLOSE); // 출력 스트림을 stdout으로
+    if (!pkey)
+        printf("pkey is NULL\n");
+    else
+        printf("tls_get_peer_public_key success\n");
 
-    if (!EVP_PKEY_print_public(out, pkey, 0, NULL)) {
-        fprintf(stderr, "EVP_PKEY_print_public failed\n");
-    }
+    // /* print delta certificate public key */
+    // BIO *out = BIO_new_fp(stdout, BIO_NOCLOSE); // 출력 스트림을 stdout으로
 
-    BIO_free(out);
-    */
+    // if (!EVP_PKEY_print_public(out, pkey, 0, NULL)) {
+    //     fprintf(stderr, "EVP_PKEY_print_public failed\n");
+    // }
+
+    // BIO_free(out);
+    
     if (pkey == NULL) {
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
         goto err;
@@ -825,14 +831,15 @@ MSG_PROCESS_RETURN tls_process_pq_cert_verify(SSL_CONNECTION *s, PACKET *pkt)
                  SSL_R_SIGNATURE_FOR_NON_SIGNING_CERTIFICATE);
         goto err;
     }*/
-
+    printf("tls_process_pq_cert_verify2\n");
     if (SSL_USE_SIGALGS(s)) {
         unsigned int sigalg;
-
+        printf("tls_process_pq_cert_verify3\n");
         if (!PACKET_get_net_2(pkt, &sigalg)) {
             SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_BAD_PACKET);
             goto err;
         }
+        printf("tls_process_pq_cert_verify4\n");
         if (tls12_check_peer_sigalg(s, sigalg, pkey) <= 0) {
             /* SSLfatal() already called */
             goto err;
@@ -1500,12 +1507,22 @@ EVP_PKEY* tls_get_peer_pkey(const SSL_CONNECTION *sc)
 
 EVP_PKEY* tls_get_peer_delta_pkey(const SSL_CONNECTION *sc)
 {
-    if (sc->session->peer_rpk != NULL)
+    printf("Server type: %d\n", sc->ssl.hybrid_hint.selected_type);
+    if (sc->session->peer_rpk != NULL) {
         return sc->session->peer_rpk;
+    }
     if (sc->session->peer != NULL){
         int crit = -1;
-        DeltaCertificateDescriptor *dcd = X509_get_ext_d2i(sc->session->peer, NID_id_ce_deltaCertificateDescriptor, &crit, NULL);
-        return X509_PUBKEY_get0(dcd->SubjectPublicKeyInfo);
+        if (sc->ssl.hybrid_hint.selected_type == HYBCERT_CHAMELEON) {
+            printf("Certificate Type: Chameleon\n");
+            DeltaCertificateDescriptor *dcd = X509_get_ext_d2i(sc->session->peer, NID_id_ce_deltaCertificateDescriptor, &crit, NULL);
+            return X509_PUBKEY_get0(dcd->SubjectPublicKeyInfo);
+        } else if (sc->ssl.hybrid_hint.selected_type == HYBCERT_CATALYST) {
+            printf("Certificate Type: Catalyst\n");
+            return X509_get_alt_pubkey(sc->session->peer);
+        } else {
+            printf("undefined\n");
+        }
     }
     return NULL;
 }
