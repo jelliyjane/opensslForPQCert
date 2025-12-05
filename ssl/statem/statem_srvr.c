@@ -2403,6 +2403,8 @@ WORK_STATE tls_post_process_client_hello(SSL_CONNECTION *s, WORK_STATE wst)
 
 CON_FUNC_RETURN tls_construct_server_hello(SSL_CONNECTION *s, WPACKET *pkt)
 {
+    struct timeval start_time, end_time;
+    gettimeofday(&start_time, NULL);
     int compm;
     size_t sl, len;
     int version;
@@ -2507,6 +2509,11 @@ CON_FUNC_RETURN tls_construct_server_hello(SSL_CONNECTION *s, WPACKET *pkt)
         /* SSLfatal() already called */;
         return CON_FUNC_ERROR;
     }
+    gettimeofday(&end_time, NULL);
+    long ms = (end_time.tv_sec - start_time.tv_sec) * 1000000L
+        + (end_time.tv_usec - start_time.tv_usec);
+    fprintf(stderr, "\n=====ServerHello Construct Time: %.3f=====\n\n", 
+        ms / 1000.0); fflush(stderr);
 
     return CON_FUNC_SUCCESS;
 }
@@ -4375,11 +4382,18 @@ MSG_PROCESS_RETURN tls_process_next_proto(SSL_CONNECTION *s, PACKET *pkt)
 static CON_FUNC_RETURN tls_construct_encrypted_extensions(SSL_CONNECTION *s,
                                                           WPACKET *pkt)
 {
+    struct timeval start_time, end_time;
+    gettimeofday(&start_time, NULL);
     if (!tls_construct_extensions(s, pkt, SSL_EXT_TLS1_3_ENCRYPTED_EXTENSIONS,
                                   NULL, 0)) {
         /* SSLfatal() already called */
         return CON_FUNC_ERROR;
     }
+    gettimeofday(&end_time, NULL);
+    long ms = (end_time.tv_sec - start_time.tv_sec) * 1000000L
+        + (end_time.tv_usec - start_time.tv_usec);
+    fprintf(stderr, "\n=====EncryptedExtensions Construct Time: %.3f=====\n\n", 
+        ms / 1000.0); fflush(stderr);
 
     return CON_FUNC_SUCCESS;
 }

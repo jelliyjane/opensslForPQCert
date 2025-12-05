@@ -303,11 +303,6 @@ static int get_cert_verify_tbs_data(SSL_CONNECTION *s, unsigned char *tls13tbs,
         s->s3.tmp.hyb_tbs = malloc(s->s3.tmp.hash_len);
         memcpy(s->s3.tmp.hyb_tbs, tls13tbs, s->s3.tmp.hash_len);
 
-         printf("print tls13tbs\n");
-        for (size_t i = TLS13_TBS_PREAMBLE_SIZE; i < TLS13_TBS_PREAMBLE_SIZE + hashlen; i++) {
-            printf("%02x", *((tls13tbs)+i));
-        }
-        printf("\n");
     } else {
         size_t retlen;
         long retlen_l;
@@ -325,6 +320,9 @@ static int get_cert_verify_tbs_data(SSL_CONNECTION *s, unsigned char *tls13tbs,
 
 CON_FUNC_RETURN tls_construct_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
 {
+    struct timeval start_time, end_time;
+    gettimeofday(&start_time, NULL);
+
     EVP_PKEY *pkey = NULL;
     const EVP_MD *md = NULL;
     EVP_MD_CTX *mctx = NULL;
@@ -335,7 +333,6 @@ CON_FUNC_RETURN tls_construct_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
     unsigned char tls13tbs[TLS13_TBS_PREAMBLE_SIZE + EVP_MAX_MD_SIZE];
     const SIGALG_LOOKUP *lu = s->s3.tmp.sigalg;
     SSL_CTX *sctx = SSL_CONNECTION_GET_CTX(s);
-    printf("lu->sigalg: %s\n", lu->name);
     if (lu == NULL || s->s3.tmp.cert == NULL) {
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
         goto err;
@@ -415,13 +412,6 @@ CON_FUNC_RETURN tls_construct_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
             SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_EVP_LIB);
             goto err;
         }
-        printf("=== sig (%zu bytes) ===\n", siglen);
-        for (size_t i = 0; i < siglen; i++) {
-            printf("%02x", sig[i]);
-            if ((i + 1) % 16 == 0)
-                printf("\n");
-        }
-        printf("\n");
     }
 
 #ifndef OPENSSL_NO_GOST
@@ -445,6 +435,11 @@ CON_FUNC_RETURN tls_construct_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
         /* SSLfatal() already called */
         goto err;
     }
+    gettimeofday(&end_time, NULL);
+    long ms = (end_time.tv_sec - start_time.tv_sec) * 1000000L
+        + (end_time.tv_usec - start_time.tv_usec);
+    fprintf(stderr, "\n=====CertificateVerify Construct Time: %.3f=====\n\n", 
+        ms / 1000.0); fflush(stderr);
 
     OPENSSL_free(sig);
     EVP_MD_CTX_free(mctx);
@@ -491,7 +486,6 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
         /* SSLfatal() already called */
         goto err;
     }
-    printf("lu->pq_sigalg: %s\n", lu->name);
     if (SSL_USE_SIGALGS(s) && !WPACKET_put_bytes_u16(pkt, lu->sigalg)) {
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
         goto err;
@@ -548,14 +542,6 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
             SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_EVP_LIB);
             goto err;
         }
-
-        printf("=== sig (%zu bytes) ===\n", siglen);
-        for (size_t i = 0; i < siglen; i++) {
-            printf("%02x", sig[i]);
-            if ((i + 1) % 16 == 0)
-                printf("\n");
-        }
-        printf("\n");
     }
 
 #ifndef OPENSSL_NO_GOST
@@ -716,24 +702,6 @@ MSG_PROCESS_RETURN tls_process_cert_verify(SSL_CONNECTION *s, PACKET *pkt)
             goto err;
         }
     }
-
-    printf("hdata (%zu bytes):\n", hdatalen);
-    for (size_t i = 0; i < hdatalen; i++) {
-        printf("%02x", ((unsigned char *)hdata)[i]);
-        if ((i + 1) % 16 == 0)
-            printf("\n");
-    }
-
-    printf("\n");
-
-    printf("data (%zu bytes):\n", len);
-    for (size_t i = 0; i < len; i++) {
-        printf("%02x", data[i]);
-        if ((i + 1) % 16 == 0)
-            printf("\n");
-    }
-
-    printf("\n");
     if (s->version == SSL3_VERSION) {
         if (EVP_DigestVerifyUpdate(mctx, hdata, hdatalen) <= 0
                 || EVP_MD_CTX_ctrl(mctx, EVP_CTRL_SSL3_MASTER_SECRET,
@@ -888,23 +856,6 @@ MSG_PROCESS_RETURN tls_process_pq_cert_verify(SSL_CONNECTION *s, PACKET *pkt)
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_EVP_LIB);
         goto err;
     }
-
-printf("hdata (%zu bytes):\n", hdatalen);
-for (size_t i = 0; i < hdatalen; i++) {
-    printf("%02x", ((unsigned char *)hdata)[i]);
-    if ((i + 1) % 16 == 0)
-        printf("\n");
-}
-printf("\n");
-
-    printf("data (%zu bytes):\n", len);
-    for (size_t i = 0; i < len; i++) {
-        printf("%02x", data[i]);
-        if ((i + 1) % 16 == 0)
-            printf("\n");
-    }
-
-    printf("\n");
 
     if (s->version == SSL3_VERSION) {
         if (EVP_DigestVerifyUpdate(mctx, hdata, hdatalen) <= 0
