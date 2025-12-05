@@ -1895,7 +1895,6 @@ int tls12_check_peer_sigalg(SSL_CONNECTION *s, uint16_t sig, EVP_PKEY *pkey)
             pkeyid = EVP_PKEY_RSA_PSS;
     }
     lu = tls1_lookup_sigalg(s, sig);
-    printf("certverify alg: %s\n", lu->name);
     /* if this sigalg is loaded, set so far unknown pkeyid to its sig NID */
     if ((pkeyid == EVP_PKEY_KEYMGMT) && (lu != NULL))
         pkeyid = lu->sig;
@@ -3757,10 +3756,8 @@ SSL_CTX *sctx = SSL_CONNECTION_GET_CTX(s);
 
 /* Look for a shared sigalgs matching possible certificates */
 for (i = 0; i < s->shared_sigalgslen; i++) {
-    printf("s->shared_sigalgs[i]->name: %s\n",s->shared_sigalgs[i]->name);
     if (!strcmp(s->shared_sigalgs[i]->name, "mldsa44")) {
         lu = s->shared_sigalgs[i];
-        printf("lu->name: %s\n",lu->name);
         return lu;        
     }
 }
@@ -3799,7 +3796,6 @@ int tls_choose_sigalg(SSL_CONNECTION *s, int fatalerrs)
         }
 
         hlu = find_pq_sig_alg(s, NULL, NULL);
-        printf("hlu->name: %s\n", hlu->name);
         if (hlu == NULL) {
             if (!fatalerrs)
                 return 1;
