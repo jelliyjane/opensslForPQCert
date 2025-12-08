@@ -9,6 +9,7 @@
 #include <openssl/bio.h>
 #include <openssl/buffer.h>
 #include <openssl/stack.h>
+#include <openssl/conf.h>
 #include <string.h>
 #include <time.h>
 #include <stdio.h>
@@ -553,6 +554,7 @@ static X509 *load_cert_file(const char *path) {
     if (!out) return NULL;
     
     X509 *cert = NULL;
+    const char *file_path = path;
     
     // Handle HTTP URIs
     if (IS_HTTP_URI(path)) {
@@ -572,47 +574,50 @@ static X509 *load_cert_file(const char *path) {
         return NULL;
     }
     
-    // Handle file:// URIs (existing functionality)
+    // Handle file:// URIs - extract the path
     if (IS_FILE_URI(path)) {
-        const char *file_path = path + 7;
-        // For absolute paths, we need to preserve the leading slash
-        // file:///path/to/file should become /path/to/file
-        if (*file_path == '/') {
-            // This is an absolute path, keep it as is
-            // But remove any trailing slashes
-            size_t len = strlen(file_path);
-            while (len > 1 && file_path[len-1] == '/') {
-                len--;
-            }
-            // Create a temporary buffer without trailing slashes
-            char *temp_path = OPENSSL_malloc(len + 1);
-            if (!temp_path) {
-                BIO_free(out);
-                ERR_raise(ERR_LIB_X509, ERR_R_MALLOC_FAILURE);
-                return NULL;
-            }
-            snprintf(temp_path, len + 1, "%.*s", (int)len, file_path);
-            
-            FILE *fp = fopen(temp_path, "r");
-            if (!fp) {
-                OPENSSL_free(temp_path);
-                BIO_free(out);
-                ERR_raise(ERR_LIB_X509, ERR_R_SYS_LIB);
-                return NULL;
-            }
-            cert = PEM_read_X509(fp, NULL, NULL, NULL);
-            fclose(fp);
-            OPENSSL_free(temp_path);
-            if (!cert) {
-                ERR_raise(ERR_LIB_X509, ERR_R_PEM_LIB);
-            }
-            BIO_free(out);
-            return cert;
-        }
+        file_path = path + 7;  // Skip "file://"
+        // For file:///path/to/file, we get /path/to/file (absolute)
+        // For file://path/to/file, we get path/to/file (relative)
     }
     
-    // Handle regular file paths (existing functionality)
-    FILE *fp = fopen(path, "r");
+    // Handle absolute paths (starting with /) - treat directly as file path
+    // This works for both direct absolute paths and file:/// URIs
+    if (file_path[0] == '/') {
+        // Remove any trailing slashes
+        size_t len = strlen(file_path);
+        while (len > 1 && file_path[len-1] == '/') {
+            len--;
+        }
+        
+        // Create a temporary buffer without trailing slashes
+        char *temp_path = OPENSSL_malloc(len + 1);
+        if (!temp_path) {
+            BIO_free(out);
+            ERR_raise(ERR_LIB_X509, ERR_R_MALLOC_FAILURE);
+            return NULL;
+        }
+        snprintf(temp_path, len + 1, "%.*s", (int)len, file_path);
+        
+        FILE *fp = fopen(temp_path, "r");
+        if (!fp) {
+            OPENSSL_free(temp_path);
+            BIO_free(out);
+            ERR_raise(ERR_LIB_X509, ERR_R_SYS_LIB);
+            return NULL;
+        }
+        cert = PEM_read_X509(fp, NULL, NULL, NULL);
+        fclose(fp);
+        OPENSSL_free(temp_path);
+        if (!cert) {
+            ERR_raise(ERR_LIB_X509, ERR_R_PEM_LIB);
+        }
+        BIO_free(out);
+        return cert;
+    }
+    
+    // Handle regular file paths (relative paths or paths without URI scheme)
+    FILE *fp = fopen(file_path, "r");
     if (!fp) {
         BIO_free(out);
         ERR_raise(ERR_LIB_X509, ERR_R_SYS_LIB);
@@ -907,6 +912,192 @@ static void *d2i_related_certificate(const X509V3_EXT_METHOD *method, const unsi
     return d2i_RELATED_CERTIFICATE(NULL, in, len);
 }
 
+// Convert configuration values to RELATED_CERTIFICATE structure (v2i)
+static void *v2i_related_certificate(const X509V3_EXT_METHOD *method,
+                                     X509V3_CTX *ctx,
+                                     STACK_OF(CONF_VALUE) *nval)
+{
+    RELATED_CERTIFICATE *rc = NULL;
+    X509_ALGOR *hash_algor = NULL;
+    ASN1_OCTET_STRING *hash_value = NULL;
+    X509 *related_cert = NULL;
+    unsigned char *cert_der = NULL;
+    unsigned char hash[EVP_MAX_MD_SIZE];
+    unsigned int hash_len = 0;
+    int cert_len = 0;
+    const EVP_MD *hash_alg = EVP_sha256(); // Default to SHA-256
+    char *cert_path = NULL;
+    char *hash_alg_name = NULL;
+    int i, num;
+    CONF_VALUE *val;
+
+    if (nval == NULL || (num = sk_CONF_VALUE_num(nval)) == 0) {
+        ERR_raise(ERR_LIB_X509V3, X509V3_R_INVALID_EXTENSION_STRING);
+        return NULL;
+    }
+
+    // Parse configuration values
+    for (i = 0; i < num; i++) {
+        val = sk_CONF_VALUE_value(nval, i);
+        if (val->name == NULL)
+            continue;
+
+        if (strcmp(val->name, "certificate") == 0 || strcmp(val->name, "cert") == 0) {
+            if (val->value == NULL) {
+                ERR_raise(ERR_LIB_X509V3, X509V3_R_INVALID_EXTENSION_STRING);
+                goto err;
+            }
+            cert_path = val->value;
+        } else if (strcmp(val->name, "hashAlgorithm") == 0 || strcmp(val->name, "hash") == 0) {
+            if (val->value == NULL) {
+                ERR_raise(ERR_LIB_X509V3, X509V3_R_INVALID_EXTENSION_STRING);
+                goto err;
+            }
+            hash_alg_name = val->value;
+        }
+    }
+
+    // Certificate path is required
+    if (cert_path == NULL) {
+        ERR_raise_data(ERR_LIB_X509V3, X509V3_R_INVALID_EXTENSION_STRING,
+                       "certificate path is required");
+        goto err;
+    }
+
+    // Get hash algorithm if specified
+    if (hash_alg_name != NULL) {
+        hash_alg = EVP_get_digestbyname(hash_alg_name);
+        if (hash_alg == NULL) {
+            ERR_raise_data(ERR_LIB_X509V3, X509V3_R_INVALID_EXTENSION_STRING,
+                           "unknown hash algorithm: %s", hash_alg_name);
+            goto err;
+        }
+    }
+
+    // Load the related certificate
+    related_cert = load_cert_file(cert_path);
+    if (related_cert == NULL) {
+        ERR_raise_data(ERR_LIB_X509V3, X509V3_R_INVALID_EXTENSION_STRING,
+                       "failed to load certificate from: %s", cert_path);
+        goto err;
+    }
+
+    // Create RELATED_CERTIFICATE structure
+    rc = RELATED_CERTIFICATE_new();
+    if (!rc) {
+        ERR_raise(ERR_LIB_X509V3, ERR_R_MALLOC_FAILURE);
+        goto err;
+    }
+
+    // Set hash algorithm
+    hash_algor = X509_ALGOR_new();
+    if (!hash_algor) {
+        ERR_raise(ERR_LIB_X509V3, ERR_R_MALLOC_FAILURE);
+        goto err;
+    }
+    if (!X509_ALGOR_set0(hash_algor, OBJ_nid2obj(EVP_MD_get_type(hash_alg)),
+                         V_ASN1_NULL, NULL)) {
+        ERR_raise(ERR_LIB_X509V3, ERR_R_X509_LIB);
+        goto err;
+    }
+    rc->hashAlgorithm = hash_algor;
+
+    // Calculate hash of the related certificate
+    cert_len = i2d_X509(related_cert, &cert_der);
+    if (cert_len <= 0) {
+        ERR_raise(ERR_LIB_X509V3, ERR_R_ASN1_LIB);
+        goto err;
+    }
+
+    if (!EVP_Digest(cert_der, cert_len, hash, &hash_len, hash_alg, NULL)) {
+        ERR_raise(ERR_LIB_X509V3, ERR_R_EVP_LIB);
+        goto err;
+    }
+
+    // Set hash value
+    hash_value = ASN1_OCTET_STRING_new();
+    if (!hash_value) {
+        ERR_raise(ERR_LIB_X509V3, ERR_R_MALLOC_FAILURE);
+        goto err;
+    }
+    if (!ASN1_OCTET_STRING_set(hash_value, hash, hash_len)) {
+        ERR_raise(ERR_LIB_X509V3, ERR_R_ASN1_LIB);
+        goto err;
+    }
+    rc->hashValue = hash_value;
+
+    // Cleanup
+    X509_free(related_cert);
+    OPENSSL_free(cert_der);
+    return rc;
+
+err:
+    RELATED_CERTIFICATE_free(rc);
+    X509_free(related_cert);
+    OPENSSL_free(cert_der);
+    return NULL;
+}
+
+// Convert RELATED_CERTIFICATE structure to configuration values (i2v)
+static STACK_OF(CONF_VALUE) *i2v_related_certificate(const X509V3_EXT_METHOD *method,
+                                                     void *ext,
+                                                     STACK_OF(CONF_VALUE) *extlist)
+{
+    RELATED_CERTIFICATE *rc = (RELATED_CERTIFICATE *)ext;
+    char hash_alg_name[80];
+    char hash_hex[EVP_MAX_MD_SIZE * 2 + 1];
+    int i;
+
+    if (rc == NULL) {
+        ERR_raise(ERR_LIB_X509V3, ERR_R_PASSED_NULL_PARAMETER);
+        return NULL;
+    }
+
+    // Get hash algorithm name
+    if (rc->hashAlgorithm && rc->hashAlgorithm->algorithm) {
+        OBJ_obj2txt(hash_alg_name, sizeof(hash_alg_name),
+                    rc->hashAlgorithm->algorithm, 0);
+    } else {
+        strncpy(hash_alg_name, "unknown", sizeof(hash_alg_name) - 1);
+        hash_alg_name[sizeof(hash_alg_name) - 1] = '\0';
+    }
+
+    // Convert hash value to hex string
+    if (rc->hashValue && rc->hashValue->length > 0) {
+        for (i = 0; i < rc->hashValue->length && i < EVP_MAX_MD_SIZE; i++) {
+            snprintf(hash_hex + (i * 2), 3, "%02X", rc->hashValue->data[i]);
+        }
+        hash_hex[rc->hashValue->length * 2] = '\0';
+    } else {
+        hash_hex[0] = '\0';
+    }
+
+    // Add values to the list
+    if (extlist == NULL) {
+        extlist = sk_CONF_VALUE_new_null();
+        if (extlist == NULL) {
+            ERR_raise(ERR_LIB_X509V3, ERR_R_MALLOC_FAILURE);
+            return NULL;
+        }
+    }
+
+    if (!X509V3_add_value("hashAlgorithm", hash_alg_name, &extlist)) {
+        ERR_raise(ERR_LIB_X509V3, ERR_R_MALLOC_FAILURE);
+        if (extlist != NULL)
+            sk_CONF_VALUE_pop_free(extlist, X509V3_conf_free);
+        return NULL;
+    }
+
+    if (!X509V3_add_value("hashValue", hash_hex, &extlist)) {
+        ERR_raise(ERR_LIB_X509V3, ERR_R_MALLOC_FAILURE);
+        if (extlist != NULL)
+            sk_CONF_VALUE_pop_free(extlist, X509V3_conf_free);
+        return NULL;
+    }
+
+    return extlist;
+}
+
 X509V3_EXT_METHOD v3_related_certificate = {
     NID_id_pe_relatedCert,           /* ext_nid */
     X509V3_EXT_MULTILINE,            /* ext_flags */
@@ -915,7 +1106,8 @@ X509V3_EXT_METHOD v3_related_certificate = {
     (X509V3_EXT_D2I)d2i_related_certificate,         /* d2i */
     NULL,                            /* i2d */
     NULL, NULL,                      /* i2s, s2i */
-    NULL, NULL,                      /* i2v, v2i */
+    (X509V3_EXT_I2V)i2v_related_certificate,  /* i2v */
+    (X509V3_EXT_V2I)v2i_related_certificate,   /* v2i */
     i2r_related_certificate,         /* i2r */
     NULL,                            /* r2i */
     NULL                             /* usr_data */

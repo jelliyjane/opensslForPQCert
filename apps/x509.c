@@ -25,11 +25,8 @@
 #ifndef OPENSSL_NO_DSA
 # include <openssl/dsa.h>
 #endif
-#include "internal/e_os.h"    /* For isatty() */
 #include <openssl/v3_certbind.h>
-
-// Forward declarations for ASN.1 structures
-DECLARE_ASN1_FUNCTIONS(REQUESTER_CERTIFICATE)
+#include "internal/e_os.h"    /* For isatty() */
 
 #undef POSTFIX
 #define POSTFIX ".srl"
@@ -42,6 +39,7 @@ static ASN1_INTEGER *x509_load_serial(const char *CAfile,
                                       const char *serialfile, int create);
 static int purpose_print(BIO *bio, X509 *cert, X509_PURPOSE *pt);
 static int print_x509v3_exts(BIO *bio, X509 *x, const char *ext_names);
+static int process_related_cert_request(X509_REQ *req, X509 *cert);
 
 typedef enum OPTION_choice {
     OPT_COMMON,
@@ -59,7 +57,6 @@ typedef enum OPTION_choice {
     OPT_SUBJECT_HASH_OLD, OPT_ISSUER_HASH_OLD, OPT_COPY_EXTENSIONS,
     OPT_BADSIG, OPT_MD, OPT_ENGINE, OPT_NOCERT, OPT_PRESERVE_DATES,
     OPT_R_ENUM, OPT_PROV_ENUM, OPT_EXT,
-    OPT_ADD_RELATED_CERT = 3001,
     OPT_RELATED_URI = 3002,
 } OPTION_CHOICE;
 
@@ -155,7 +152,6 @@ const OPTIONS x509_options[] = {
     {"extfile", OPT_EXTFILE, '<', "Config file with X509V3 extensions to add"},
     {"extensions", OPT_EXTENSIONS, 's',
      "Section of extfile to use - default: unnamed section"},
-    {"add_related_cert", OPT_ADD_RELATED_CERT, '<', "PEM file of related certificate"},
     {"sigopt", OPT_SIGOPT, 's', "Signature parameter, in n:v form"},
     {"badsig", OPT_BADSIG, '-',
      "Corrupt last byte of certificate signature (for test)"},
@@ -286,7 +282,6 @@ int x509_main(int argc, char **argv)
     char *ext_names = NULL;
     char *extsect = NULL, *extfile = NULL, *passin = NULL, *passinarg = NULL;
     char *infile = NULL, *outfile = NULL, *privkeyfile = NULL, *CAfile = NULL;
-    char *related_cert_path = NULL;
     char *prog;
     int days = UNSET_DAYS; /* not explicitly set */
     int x509toreq = 0, modulus = 0, print_pubkey = 0, pprint = 0;
@@ -603,9 +598,6 @@ int x509_main(int argc, char **argv)
         case OPT_PRESERVE_DATES:
             preserve_dates = 1;
             break;
-        case OPT_ADD_RELATED_CERT:
-            related_cert_path = opt_arg();
-            break;
         case OPT_MD:
             digest = opt_unknown();
             break;
@@ -874,64 +866,11 @@ int x509_main(int argc, char **argv)
         }
     }
 
-    // Add the RelatedCertificate extension to the certificate
-    if (related_cert_path != NULL && !x509toreq) {
-        X509 *related_cert = load_cert_pass(related_cert_path, FORMAT_PEM, 1, passin, "related certificate");
-        if (related_cert == NULL) {
-            BIO_printf(bio_err, "Failed to load related certificate\n");
-            goto err;
-        }
-
-        if (!add_related_certificate_extension(x, related_cert, EVP_sha256(), related_cert_path)) {
-            BIO_printf(bio_err, "Failed to add related certificate extension\n");
-            X509_free(related_cert);
-            goto err;
-        }
-
-        X509_free(related_cert);
-    }
-
-    // Extract relatedCertRequest from CSR and add RelatedCertificate extension
+    /* Process relatedCertRequest attribute from CSR and add RelatedCertificate extension */
     if (req != NULL && !x509toreq) {
-        int idx = X509_REQ_get_attr_by_NID(req, OBJ_txt2nid("1.2.840.113549.1.9.16.2.60"), -1);
-        if (idx >= 0) {
-            X509_ATTRIBUTE *attr = X509_REQ_get_attr(req, idx);
-            const ASN1_TYPE *av = X509_ATTRIBUTE_get0_type(attr, 0);
-            if (av && av->type == V_ASN1_SEQUENCE) {
-                const unsigned char *p = av->value.sequence->data;
-                REQUESTER_CERTIFICATE *rcr = d2i_REQUESTER_CERTIFICATE(NULL, &p, av->value.sequence->length);
-                if (rcr && rcr->locationInfo && sk_ASN1_STRING_num(rcr->locationInfo->uris) > 0) {
-                    ASN1_STRING *uri_str = sk_ASN1_STRING_value(rcr->locationInfo->uris, 0);
-                    char uri_path[1024];
-                    int uri_len = uri_str->length;
-                    if (uri_len < sizeof(uri_path) - 1) {
-                        memcpy(uri_path, uri_str->data, uri_len);
-                        uri_path[uri_len] = '\0';
-                        
-                        // Remove "file://" prefix if present
-                        char *file_path = uri_path;
-                        if (strncmp(uri_path, "file://", 7) == 0) {
-                            file_path = uri_path + 7;
-                        }
-                        
-                        // Load the related certificate from the URI
-                        X509 *related_cert = load_cert_pass(file_path, FORMAT_PEM, 1, passin, "related certificate");
-                        if (related_cert != NULL) {
-                            if (!add_related_certificate_extension(x, related_cert, EVP_sha256(), uri_path)) {
-                                BIO_printf(bio_err, "Failed to add related certificate extension from CSR\n");
-                                X509_free(related_cert);
-                                REQUESTER_CERTIFICATE_free(rcr);
-                                goto err;
-                            }
-                            BIO_printf(bio_err, "Successfully added RelatedCertificate extension\n");
-                            X509_free(related_cert);
-                        } else {
-                            BIO_printf(bio_err, "Warning: Could not load related certificate from URI: %s\n", file_path);
-                        }
-                    }
-                }
-                REQUESTER_CERTIFICATE_free(rcr);
-            }
+        if (!process_related_cert_request(req, x)) {
+            /* Not an error if relatedCertRequest is not present, but log if it fails */
+            /* Errors are already printed by process_related_cert_request */
         }
     }
 
@@ -1356,5 +1295,133 @@ static int print_x509v3_exts(BIO *bio, X509 *x, const char *ext_names)
     sk_X509_EXTENSION_free(exts2);
     OPENSSL_free(names);
     OPENSSL_free(tmp_ext_names);
+    return ret;
+}
+
+/*
+ * Process relatedCertRequest attribute from CSR and add RelatedCertificate
+ * extension to the certificate. This implements the Bound certificate approach
+ * from RFC 9763.
+ *
+ * Returns 1 on success, 0 on error, -1 if relatedCertRequest is not present
+ * (which is not an error).
+ */
+static int process_related_cert_request(X509_REQ *req, X509 *cert)
+{
+    int idx;
+    X509_ATTRIBUTE *attr;
+    const ASN1_TYPE *av;
+    REQUESTER_CERTIFICATE *rcr = NULL;
+    X509 *related_cert = NULL;
+    char *uri = NULL;
+    const unsigned char *p;
+    int ret = -1;  /* Default: relatedCertRequest not present */
+    const EVP_MD *hash_alg = EVP_sha256();  /* Default hash algorithm */
+
+    if (!req || !cert)
+        return 0;
+
+    /* Check if relatedCertRequest attribute is present */
+    idx = X509_REQ_get_attr_by_NID(req, OBJ_txt2nid("1.2.840.113549.1.9.16.2.60"), -1);
+    if (idx < 0) {
+        /* relatedCertRequest not present - this is OK */
+        return -1;
+    }
+
+    /* Get the attribute */
+    attr = X509_REQ_get_attr(req, idx);
+    if (!attr) {
+        BIO_printf(bio_err, "Error getting relatedCertRequest attribute\n");
+        return 0;
+    }
+
+    av = X509_ATTRIBUTE_get0_type(attr, 0);
+    if (!av || av->type != V_ASN1_SEQUENCE) {
+        BIO_printf(bio_err, "Invalid relatedCertRequest format\n");
+        return 0;
+    }
+
+    /* Decode REQUESTER_CERTIFICATE */
+    p = av->value.sequence->data;
+    rcr = d2i_REQUESTER_CERTIFICATE(NULL, &p, av->value.sequence->length);
+    if (!rcr) {
+        BIO_printf(bio_err, "Unable to decode relatedCertRequest attribute\n");
+        return 0;
+    }
+
+    /* Extract URI from locationInfo */
+    if (!rcr->locationInfo || sk_ASN1_STRING_num(rcr->locationInfo->uris) == 0) {
+        BIO_printf(bio_err, "No URI found in relatedCertRequest locationInfo\n");
+        REQUESTER_CERTIFICATE_free(rcr);
+        return 0;
+    }
+
+    ASN1_STRING *uri_str = sk_ASN1_STRING_value(rcr->locationInfo->uris, 0);
+    if (!uri_str || uri_str->length <= 0) {
+        BIO_printf(bio_err, "Invalid URI in relatedCertRequest\n");
+        REQUESTER_CERTIFICATE_free(rcr);
+        return 0;
+    }
+
+    /* Allocate and copy URI */
+    uri = OPENSSL_malloc(uri_str->length + 1);
+    if (!uri) {
+        BIO_printf(bio_err, "Memory allocation failure\n");
+        REQUESTER_CERTIFICATE_free(rcr);
+        return 0;
+    }
+    memcpy(uri, uri_str->data, uri_str->length);
+    uri[uri_str->length] = '\0';
+
+    /* Convert file:/// URIs to direct absolute paths for easier handling */
+    /* This allows users to use either file:///path or /path directly */
+    if (strncmp(uri, "file:///", 8) == 0) {
+        /* file:///path/to/file -> /path/to/file */
+        char *file_path = uri + 7;  /* Skip "file://" to get "/path/to/file" */
+        /* Remove trailing slashes if any */
+        size_t len = strlen(file_path);
+        while (len > 1 && file_path[len-1] == '/') {
+            file_path[--len] = '\0';
+        }
+        /* Use the direct path instead of the URI */
+        related_cert = load_cert_pass(file_path, FORMAT_UNDEF, 0, NULL, "related certificate");
+    } else if (strncmp(uri, "file://", 7) == 0) {
+        /* file://path/to/file (relative) - keep as is or convert */
+        char *file_path = uri + 7;  /* Skip "file://" */
+        related_cert = load_cert_pass(file_path, FORMAT_UNDEF, 0, NULL, "related certificate");
+    } else {
+        /* Direct path (absolute or relative) or HTTP URI - use as is */
+        related_cert = load_cert_pass(uri, FORMAT_UNDEF, 0, NULL, "related certificate");
+    }
+    if (!related_cert) {
+        BIO_printf(bio_err, "Unable to load related certificate from: %s\n", uri);
+        OPENSSL_free(uri);
+        REQUESTER_CERTIFICATE_free(rcr);
+        return 0;
+    }
+
+    /* Verify certID matches the loaded certificate */
+    if (X509_NAME_cmp(rcr->certID->issuer, X509_get_issuer_name(related_cert)) != 0 ||
+        ASN1_INTEGER_cmp(rcr->certID->serialNumber, X509_get_serialNumber(related_cert)) != 0) {
+        BIO_printf(bio_err, "Warning: certID in relatedCertRequest does not match loaded certificate\n");
+        /* Continue anyway - the CA may still want to process this */
+    }
+
+    /* Add RelatedCertificate extension to the certificate */
+    if (!add_related_certificate_extension(cert, related_cert, hash_alg, uri)) {
+        BIO_printf(bio_err, "Error adding RelatedCertificate extension\n");
+        X509_free(related_cert);
+        OPENSSL_free(uri);
+        REQUESTER_CERTIFICATE_free(rcr);
+        return 0;
+    }
+
+    BIO_printf(bio_err, "Added RelatedCertificate extension from relatedCertRequest\n");
+    ret = 1;  /* Success */
+
+    /* Cleanup */
+    X509_free(related_cert);
+    OPENSSL_free(uri);
+    REQUESTER_CERTIFICATE_free(rcr);
     return ret;
 }

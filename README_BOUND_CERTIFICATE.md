@@ -83,117 +83,121 @@ mkdir -p test_bound_certs
 cd test_bound_certs
 ```
 
-### Step 1: Generate CA Infrastructure
+### Step 1: Generate Self-Signed Certificate (P-256 ECDSA)
 
 ```bash
-# Generate classic CA private key (RSA)
-openssl genpkey -algorithm RSA -out ca_rsa_key.pem 
+# Generate classic ECDSA private key (P-256)
+openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out server_p256_key.pem
 
-# Generate PQC CA private key ()
-openssl genpkey -algorithm mldsa65 -out ca_mldsa65_key.pem
-
-# Create classic CA certificate    
-openssl-oqs req -new -x509 -key ca_rsa_key.pem \
--out ca_rsa.pem -days 365 \
--subj "/C=US/ST=CA/L=San Francisco/O=TestOrg/CN=TestClassicCA"
-
-# Create PQC CA certificate
-openssl-oqs req -new -x509 -key ca_mldsa65_key.pem \
--out ca_mldsa65_cert.pem -days 365 \
--subj "/C=US/ST=CA/L=San Francisco/O=TestOrg/CN=TestPQCA"
+# Create self-signed P-256 certificate
+openssl req -new -x509 -key server_p256_key.pem \
+  -out server_p256_cert.pem -days 365 \
+  -subj "/CN=server.example.com"
 ```
 
-### Step 2: Generate Bound Certificate for server (RSA)
+### Step 2: Generate Bound Certificate (MLDSA44) with relatedCertRequest
 
 ```bash
-# Generate bound certificate private key (RSA)
-openssl genpkey -algorithm RSA -out server_rsa_key.pem
+# Generate PQC private key (MLDSA44)
+openssl genpkey -algorithm mldsa44 -out server_mldsa44_key.pem
 
-# Create bound certificate request
-openssl req -new -key server_rsa_key.pem -out server_rsa_req.pem \
+# Create CSR with relatedCertRequest attribute pointing to the P-256 certificate
+openssl req -new \
+  -key server_mldsa44_key.pem \
+  -out server_mldsa44_bound_req.pem \
+  -subj "/C=US/ST=CA/L=San Francisco/O=TestOrg/CN=server.example.com" \
+  -add_related_cert server_p256_cert.pem \
+  -related_uri "$(pwd)/server_p256_cert.pem"
+
+# Sign the CSR to create a self-signed certificate
+# The RelatedCertificate extension will be automatically added
+openssl x509 -req -in server_mldsa44_bound_req.pem \
+  -key server_mldsa44_key.pem \
+  -out server_mldsa44_bound_cert.pem -days 365
+```
+
+### Step 3: Alternative - Generate Bound Certificate (P-256) pointing to MLDSA44
+
+```bash
+# If you want to create a P-256 certificate bound to a MLDSA44 certificate
+# (reverse direction: PQC → Classic)
+
+# First, create a self-signed MLDSA44 certificate
+openssl genpkey -algorithm mldsa44 -out server_pqc_key.pem
+openssl req -new -x509 -key server_pqc_key.pem \
+  -out server_pqc_cert.pem -days 365 \
   -subj "/C=US/ST=CA/L=San Francisco/O=TestOrg/CN=server.example.com"
 
-
-# Sign bound certificate
-openssl x509 -req -in server_rsa_req.pem \
-  -CA ca_rsa.pem -CAkey ca_rsa_key.pem -CAcreateserial \
-  -out server_rsa_cert.pem -days 365
-
-```
-
-### Step 3: Generate New Certificate (Mldsa65)
-
-```bash
-# Generate new certificate private key (Mldsa65)
-openssl genpkey -algorithm mldsa65 -out server_mldsa65_key.pem
-
-
-# Create CSR with relatedCertRequest attribute
+# Then create P-256 CSR with relatedCertRequest pointing to MLDSA44 certificate
 openssl req -new \
-  -key server_mldsa65_key.pem \
-  -out server_mldsa65_bound_req.pem \
+  -key server_p256_key.pem \
+  -out server_p256_bound_req.pem \
   -subj "/C=US/ST=CA/L=San Francisco/O=TestOrg/CN=server.example.com" \
-  -add_related_cert server_rsa_cert.pem \
-  -related_uri "file://$(pwd)/server_rsa_cert.pem"
+  -add_related_cert server_pqc_cert.pem \
+  -related_uri "$(pwd)/server_pqc_cert.pem"
 
-# Sign the CSR to create the new certificate
-openssl x509 -req -in server_mldsa65_bound_req.pem \
-  -CA ca_mldsa65_cert.pem -CAkey ca_mldsa65_key.pem -CAcreateserial \
-  -out server_mldsa65_bound_cert.pem -days 365
-
+# Sign to create self-signed P-256 certificate with RelatedCertificate extension
+openssl x509 -req -in server_p256_bound_req.pem \
+  -key server_p256_key.pem \
+  -out server_p256_bound_cert.pem -days 365
 ```
 
 ### Step 4: Verification
 
 ```bash
 # Verify the CSR with relatedCertRequest attribute
-openssl req -in server_mldsa65_bound_req.pem -text -noout
+openssl req -in server_mldsa44_bound_req.pem -text -noout
 
 # Check the relatedCertRequest attribute specifically
-openssl req -in server_mldsa65_bound_req.pem -text -noout | grep -A 20 "relatedCertRequest"
-
-# Verify the final certificate
-openssl x509 -in server_mldsa65_bound_cert.pem -text -noout
-
-# Check the RelatedCertificate extension
-openssl x509 -in server_mldsa65_bound_cert.pem -text -noout | grep -A 20 "Bound certificate extension"
+openssl req -in server_mldsa44_bound_req.pem -text -noout | grep -A 20 "relatedCertRequest"
 
 # Verify the signature of the relatedCertRequest attribute
-openssl req -in server_mldsa65_bound_req.pem -verify -noout
+openssl req -in server_mldsa44_bound_req.pem -verify -noout
+
+# Verify self-signed certificates
+openssl x509 -in server_p256_cert.pem -text -noout 
+
+# Verify the bound certificate
+openssl x509 -in server_mldsa44_bound_cert.pem -text -noout 
+
+# Check the RelatedCertificate extension in the final certificate
+openssl x509 -in server_mldsa44_bound_cert.pem -text -noout | grep -A 20 "Bound certificate extension"
+
+# Verify that the RelatedCertificate extension was automatically added
+# The extension should contain the hash of server_p256_cert.pem
 ```
 
-### Step 5: Verification avec verify
+### Step 5: TLS Handshake Testing
+
+#### 5.1 Starting the OpenSSL Server
 
 ```bash
-openssl verify -dual -CAfile ca_rsa.pem -pqcafile ca_mldsa65_cert.pem server_rsa_cert.pem server_mldsa65_bound_cert.pem
-```
-
-### Step 6: TLS Handshake Testing
-
-#### 6.1 Starting the OpenSSL Server
-
-```bash
-# Start the TLS server with the generated certificates
+# Start the TLS server with self-signed certificates
+# Note: For self-signed certificates, you can omit -CAfile and -pqcafile
+# or use -verify_return_error to require client certificates
 openssl s_server \
-  -cert server_rsa_cert.pem -key server_rsa_key.pem \
-  -pqcert server_mldsa65_bound_cert.pem -pqkey server_mldsa65_key.pem \
-  -CAfile ca_rsa.pem -pqcafile ca_mldsa65_cert.pem \
+  -cert server_p256_cert.pem -key server_p256_key.pem \
+  -pqcert server_mldsa44_bound_cert.pem -pqkey server_mldsa44_key.pem \
   -enable_dual_certs \
   -msg -debug
 
 ```
 
-#### 6.2 Connecting the OpenSSL Client
+#### 5.2 Connecting the OpenSSL Client
 
 ```bash
 # In another terminal, connect a TLS client
-openssl s_client -connect localhost:4433 -CAfile ca_cert.pem -pqcafile ca_mldsa65_cert.pem -msg
+# For self-signed certificates, use -verify_return_error or -verify_depth 0
+# to accept self-signed certificates
+openssl s_client -connect localhost:4433 \
+  -verify_return_error -verify_depth 0 \
+  -msg
 ```
 
 
-### Step 7: Results Analysis
+### Step 6: Results Analysis
 
-#### 7.1 Expected TLS Messages
+#### 6.1 Expected TLS Messages
 
 The TLS 1.3 handshake should proceed as follows:
 
