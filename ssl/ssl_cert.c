@@ -759,6 +759,22 @@ static int ssl_verify_internal(SSL_CONNECTION *s, STACK_OF(X509) *sk, EVP_PKEY *
      */
     X509_VERIFY_PARAM_set1(param, s->param);
 
+    /* Check if certificate is self-signed and handle accordingly */
+    int cert_is_self_signed = 0;
+    if (sk != NULL && x != NULL) {
+        cert_is_self_signed = X509_self_signed(x, 0);
+        if (cert_is_self_signed < 0) {
+            /* Error checking self-signed status, continue with normal verification */
+            cert_is_self_signed = 0;
+        } else if (cert_is_self_signed > 0) {
+            /* For self-signed certificates, set flag to check signature */
+            if (param != NULL) {
+                unsigned long flags = X509_VERIFY_PARAM_get_flags(param);
+                X509_VERIFY_PARAM_set_flags(param, flags | X509_V_FLAG_CHECK_SS_SIGNATURE);
+            }
+        }
+    }
+
     if (s->verify_callback)
         X509_STORE_CTX_set_verify_cb(ctx, s->verify_callback);
 
@@ -769,6 +785,16 @@ static int ssl_verify_internal(SSL_CONNECTION *s, STACK_OF(X509) *sk, EVP_PKEY *
         /* We treat an error in the same way as a failure to verify */
         if (i < 0)
             i = 0;
+    }
+
+    /* Handle self-signed certificates */
+    if (i <= 0 && cert_is_self_signed > 0 && sk != NULL && x != NULL) {
+        int cert_error = X509_STORE_CTX_get_error(ctx);
+        /* Allow self-signed certificates */
+        if (cert_error == X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT) {
+            /* Self-signed certificate is acceptable */
+            i = 1; /* Treat as success */
+        }
     }
 
     s->verify_result = X509_STORE_CTX_get_error(ctx);

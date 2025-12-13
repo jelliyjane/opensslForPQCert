@@ -2211,6 +2211,24 @@ WORK_STATE tls_post_process_server_certificate(SSL_CONNECTION *s,
         return WORK_MORE_A;
 
     /*
+     * Verify PQC certificate chain if dual certificates are enabled
+     */
+    if (s->session->dual_certs_enabled && s->session->peer_pqc_chain != NULL
+        && sk_X509_num(s->session->peer_pqc_chain) > 0) {
+        ERR_set_mark();
+        int pqc_verify_result = ssl_verify_cert_chain(s, s->session->peer_pqc_chain);
+        if (pqc_verify_result <= 0 && s->verify_mode != SSL_VERIFY_NONE) {
+            ERR_clear_last_mark();
+            SSLfatal(s, ssl_x509err2alert(s->verify_result),
+                     SSL_R_CERTIFICATE_VERIFY_FAILED);
+            return WORK_ERROR;
+        }
+        ERR_pop_to_mark();
+        if (pqc_verify_result > 0 && s->rwstate == SSL_RETRY_VERIFY)
+            return WORK_MORE_A;
+    }
+
+    /*
      * Inconsistency alert: cert_chain does include the peer's certificate,
      * which we don't include in statem_srvr.c
      */
