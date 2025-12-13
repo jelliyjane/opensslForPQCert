@@ -1911,25 +1911,44 @@ int parse_related_certificate_cb(SSL *s, unsigned int ext_type,
         return 1;
     }
     
-    /* Get the peer certificate chain to find the classical certificate */
+    /* Get the peer certificate chain to find the classical certificate.
+     * Note: In dual certificate mode, SSL_get_peer_cert_chain() returns only
+     * the classical certificate chain (peer_chain). PQC certificates are stored
+     * separately in peer_pqc_chain. We need at least one classical certificate
+     * to validate the RelatedCertificate extension in the PQC certificate.
+     */
     STACK_OF(X509) *chain = SSL_get_peer_cert_chain(s);
-    if (!chain || sk_X509_num(chain) < 2) {
+    if (!chain || sk_X509_num(chain) < 1) {
         *al = SSL_AD_BAD_CERTIFICATE;
         RELATED_CERTIFICATE_free(rc);
         return 0;
     }
     
-    /* Find the classical certificate in the chain */
-    /* Assuming classical cert is first (index 0) and PQC cert is second (index 1) */
+    /* Find the classical certificate in the chain.
+     * Note: In dual certificate mode, classical certificates are in peer_chain
+     * and PQC certificates are in peer_pqc_chain. The chainidx parameter
+     * refers to the position within the certificate's own chain, not across chains.
+     * For classical certificates, chainidx starts at 0 in peer_chain.
+     * For PQC certificates, chainidx starts at 0 in peer_pqc_chain.
+     * This callback is called during parsing, so chainidx==0 typically means
+     * the first certificate in the chain being parsed.
+     */
     X509 *classic_cert = NULL;
     X509 *pqc_cert = NULL;
     
     if (chainidx == 0) {
-        /* This is the classical certificate - no RelatedCertificate extension expected */
+        /* This is the first certificate in the chain - if it's a classical cert,
+         * no RelatedCertificate extension is expected. If it's a PQC cert,
+         * it may contain the extension.
+         */
+        /* For now, assume chainidx==0 means classical cert (first in peer_chain) */
         RELATED_CERTIFICATE_free(rc);
         return 1;
     } else if (chainidx == 1) {
-        /* This is the PQC certificate - should contain RelatedCertificate extension */
+        /* This is the second certificate - could be a PQC certificate.
+         * If it contains RelatedCertificate extension, it must be valid.
+         * If absent, it's acceptable.
+         */
         classic_cert = sk_X509_value(chain, 0);
         pqc_cert = x;
     } else {

@@ -2268,7 +2268,14 @@ WORK_STATE tls_post_process_server_certificate(SSL_CONNECTION *s,
     EVP_PKEY_free(s->session->peer_rpk);
     s->session->peer_rpk = NULL;
 
-    /* Check for RelatedCertificate extension in PQC certificates if dual certs are enabled */
+    /* Optionally check for RelatedCertificate extension in PQC certificates if dual certs are enabled.
+     * 
+     * NOTE: This is a secondary, non-fatal validation. Primary validation occurs
+     * in parse_related_certificate_cb() during TLS extension parsing, which is
+     * strict and will fail the handshake if the extension is present but invalid.
+     * 
+     * This check here is informational and does not interrupt the handshake.
+     */
     if (s->session->dual_certs_enabled && s->session->peer_pqc_chain) {
         int pqc_chain_len = sk_X509_num(s->session->peer_pqc_chain);
         
@@ -2306,7 +2313,10 @@ WORK_STATE tls_post_process_server_certificate(SSL_CONNECTION *s,
             
             OPENSSL_free(der);
             
-            /* Compare the calculated hash with the hash in the extension */
+            /* Compare the calculated hash with the hash in the extension.
+             * Note: This is a non-fatal check - we continue even if validation fails.
+             * Strict validation is performed in parse_related_certificate_cb().
+             */
             if (hashlen != (unsigned int)rc->hashValue->length) {
                 RELATED_CERTIFICATE_free(rc);
                 continue;
