@@ -322,6 +322,10 @@ static int get_cert_verify_tbs_data(SSL_CONNECTION *s, unsigned char *tls13tbs,
 CON_FUNC_RETURN tls_construct_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
 {
     OSSL_TIME start = ossl_time_now();
+    uint64_t start_us = ossl_time2us(start);
+    fprintf(stderr, "[%lu.%06lu] tls_construct_cert_verify start\n",
+            (unsigned long)(start_us / 1000000),
+            (unsigned long)(start_us % 1000000));
 
     EVP_PKEY *pkey = NULL;
     const EVP_MD *md = NULL;
@@ -442,6 +446,10 @@ CON_FUNC_RETURN tls_construct_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
     fprintf(stderr, "TLS CertificateVerify construction time: %lu us\n",
             (unsigned long)elapsed);
     printf("\n===========================================================\n\n");
+    uint64_t end_us = ossl_time2us(end);
+    fprintf(stderr, "[%lu.%06lu] tls_construct_cert_verify end\n",
+            (unsigned long)(end_us / 1000000),
+            (unsigned long)(end_us % 1000000));
 
     OPENSSL_free(sig);
     EVP_MD_CTX_free(mctx);
@@ -456,6 +464,10 @@ CON_FUNC_RETURN tls_construct_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
 CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
 {
     OSSL_TIME start = ossl_time_now();
+    uint64_t start_us = ossl_time2us(start);
+    fprintf(stderr, "[%lu.%06lu] tls_construct_pq_cert_verify start\n",
+            (unsigned long)(start_us / 1000000),
+            (unsigned long)(start_us % 1000000));
 
     EVP_PKEY *pkey = NULL;
     const EVP_MD *md = NULL;
@@ -576,6 +588,10 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
     fprintf(stderr, "TLS PQCertificateVerify construction time: %lu us\n",
             (unsigned long)elapsed);
     printf("\n===========================================================\n\n");
+    uint64_t end_us = ossl_time2us(end);
+    fprintf(stderr, "[%lu.%06lu] tls_construct_pq_cert_verify end\n",
+            (unsigned long)(end_us / 1000000),
+            (unsigned long)(end_us % 1000000));
 
     OPENSSL_free(sig);
     EVP_MD_CTX_free(mctx);
@@ -589,6 +605,10 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
 MSG_PROCESS_RETURN tls_process_cert_verify(SSL_CONNECTION *s, PACKET *pkt)
 {
     OSSL_TIME start = ossl_time_now();
+    uint64_t start_us = ossl_time2us(start);
+    fprintf(stderr, "[%lu.%06lu] tls_process_cert_verify start\n",
+            (unsigned long)(start_us / 1000000),
+            (unsigned long)(start_us % 1000000));
 
     EVP_PKEY *pkey = NULL;
     const unsigned char *data;
@@ -766,13 +786,21 @@ MSG_PROCESS_RETURN tls_process_cert_verify(SSL_CONNECTION *s, PACKET *pkt)
     fprintf(stderr, "TLS CertificateVerify process time: %lu us\n",
             (unsigned long)elapsed);
     printf("\n===========================================================\n\n");
-    
+    uint64_t end_us = ossl_time2us(end);
+    fprintf(stderr, "[%lu.%06lu] tls_process_cert_verify end\n",
+            (unsigned long)(end_us / 1000000),
+            (unsigned long)(end_us % 1000000));
+
     return ret;
 }
 
 MSG_PROCESS_RETURN tls_process_pq_cert_verify(SSL_CONNECTION *s, PACKET *pkt)
 {
     OSSL_TIME start = ossl_time_now();
+    uint64_t start_us = ossl_time2us(start);
+    fprintf(stderr, "[%lu.%06lu] tls_process_pq_cert_verify start\n",
+            (unsigned long)(start_us / 1000000),
+            (unsigned long)(start_us % 1000000));
 
     printf("tls_process_pq_cert_verify\n");
     EVP_PKEY *pkey = NULL;
@@ -930,6 +958,10 @@ MSG_PROCESS_RETURN tls_process_pq_cert_verify(SSL_CONNECTION *s, PACKET *pkt)
     fprintf(stderr, "TLS PQCertificateVerify process time: %lu us\n",
             (unsigned long)elapsed);
     printf("\n===========================================================\n\n");
+    uint64_t end_us = ossl_time2us(end);
+    fprintf(stderr, "[%lu.%06lu] tls_process_pq_cert_verify end\n",
+            (unsigned long)(end_us / 1000000),
+            (unsigned long)(end_us % 1000000));
 
     return ret;
 }
@@ -987,6 +1019,10 @@ int tls_process_pq_cert_verify_minimal(SSL_CONNECTION *s, PACKET *pkt)
 CON_FUNC_RETURN tls_construct_finished(SSL_CONNECTION *s, WPACKET *pkt)
 {
     OSSL_TIME start = ossl_time_now();
+    uint64_t start_us = ossl_time2us(start);
+    fprintf(stderr, "[%lu.%06lu] tls_construct_finished start\n",
+            (unsigned long)(start_us / 1000000),
+            (unsigned long)(start_us % 1000000));
 
     size_t finish_md_len;
     const char *sender;
@@ -1071,6 +1107,10 @@ CON_FUNC_RETURN tls_construct_finished(SSL_CONNECTION *s, WPACKET *pkt)
     fprintf(stderr, "TLS Finished construction time: %lu us\n",
             (unsigned long)elapsed);
     printf("\n===========================================================\n\n");
+    uint64_t end_us = ossl_time2us(end);
+    fprintf(stderr, "[%lu.%06lu] tls_construct_finished end\n",
+            (unsigned long)(end_us / 1000000),
+            (unsigned long)(end_us % 1000000));
 
     return CON_FUNC_SUCCESS;
 }
@@ -1220,6 +1260,10 @@ MSG_PROCESS_RETURN tls_process_change_cipher_spec(SSL_CONNECTION *s,
 MSG_PROCESS_RETURN tls_process_finished(SSL_CONNECTION *s, PACKET *pkt)
 {
     OSSL_TIME start = ossl_time_now();
+    uint64_t start_us = ossl_time2us(start);
+    fprintf(stderr, "[%lu.%06lu] tls_process_finished start\n",
+            (unsigned long)(start_us / 1000000),
+            (unsigned long)(start_us % 1000000));
 
     size_t md_len;
     SSL *ssl = SSL_CONNECTION_GET_SSL(s);
@@ -1344,6 +1388,10 @@ MSG_PROCESS_RETURN tls_process_finished(SSL_CONNECTION *s, PACKET *pkt)
     fprintf(stderr, "TLS Finished process time: %lu us\n",
             (unsigned long)elapsed);
     printf("\n===========================================================\n\n");
+    uint64_t end_us = ossl_time2us(end);
+    fprintf(stderr, "[%lu.%06lu] tls_process_finished end\n",
+            (unsigned long)(end_us / 1000000),
+            (unsigned long)(end_us % 1000000));
 
     return MSG_PROCESS_FINISHED_READING;
 }

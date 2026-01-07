@@ -2283,6 +2283,10 @@ int tls_handle_alpn(SSL_CONNECTION *s)
 WORK_STATE tls_post_process_client_hello(SSL_CONNECTION *s, WORK_STATE wst)
 {
     OSSL_TIME start = ossl_time_now();
+    uint64_t start_us = ossl_time2us(start);
+    fprintf(stderr, "[%lu.%06lu] tls_post_process_client_hello start\n",
+            (unsigned long)(start_us / 1000000),
+            (unsigned long)(start_us % 1000000));
 
     const SSL_CIPHER *cipher;
     SSL *ssl = SSL_CONNECTION_GET_SSL(s);
@@ -2404,6 +2408,10 @@ WORK_STATE tls_post_process_client_hello(SSL_CONNECTION *s, WORK_STATE wst)
     fprintf(stderr, "TLS ClientHello process time: %lu us\n",
             (unsigned long)elapsed);
     printf("\n===========================================================\n\n");
+    uint64_t end_us = ossl_time2us(end);
+    fprintf(stderr, "[%lu.%06lu] tls_post_process_client_hello end\n",
+            (unsigned long)(end_us / 1000000),
+            (unsigned long)(end_us % 1000000));
 
     return WORK_FINISHED_STOP;
  err:
@@ -2413,6 +2421,10 @@ WORK_STATE tls_post_process_client_hello(SSL_CONNECTION *s, WORK_STATE wst)
 CON_FUNC_RETURN tls_construct_server_hello(SSL_CONNECTION *s, WPACKET *pkt)
 {
     OSSL_TIME start = ossl_time_now();
+    uint64_t start_us = ossl_time2us(start);
+    fprintf(stderr, "[%lu.%06lu] tls_construct_server_hello start\n",
+            (unsigned long)(start_us / 1000000),
+            (unsigned long)(start_us % 1000000));
 
     int compm;
     size_t sl, len;
@@ -2525,6 +2537,10 @@ CON_FUNC_RETURN tls_construct_server_hello(SSL_CONNECTION *s, WPACKET *pkt)
     fprintf(stderr, "TLS ServerHello construction time: %lu us\n",
             (unsigned long)elapsed);
     printf("\n===========================================================\n\n");
+    uint64_t end_us = ossl_time2us(end);
+    fprintf(stderr, "[%lu.%06lu] tls_construct_server_hello end\n",
+            (unsigned long)(end_us / 1000000),
+            (unsigned long)(end_us % 1000000));
 
     return CON_FUNC_SUCCESS;
 }
@@ -3843,6 +3859,10 @@ MSG_PROCESS_RETURN tls_process_client_compressed_certificate(SSL_CONNECTION *sc,
 CON_FUNC_RETURN tls_construct_server_certificate(SSL_CONNECTION *s, WPACKET *pkt)
 {
     OSSL_TIME start = ossl_time_now();
+    uint64_t start_us = ossl_time2us(start);
+    fprintf(stderr, "[%lu.%06lu] tls_construct_server_certificate start\n",
+            (unsigned long)(start_us / 1000000),
+            (unsigned long)(start_us % 1000000));
 
     CERT_PKEY *cpk = s->s3.tmp.cert;
 
@@ -3883,6 +3903,10 @@ CON_FUNC_RETURN tls_construct_server_certificate(SSL_CONNECTION *s, WPACKET *pkt
     fprintf(stderr, "TLS Server Certificate construction time: %lu us\n",
             (unsigned long)elapsed);
     printf("\n===========================================================\n\n");
+    uint64_t end_us = ossl_time2us(end);
+    fprintf(stderr, "[%lu.%06lu] tls_construct_server_certificate end\n",
+            (unsigned long)(end_us / 1000000),
+            (unsigned long)(end_us % 1000000));
 
     return CON_FUNC_SUCCESS;
 }
@@ -4403,6 +4427,10 @@ static CON_FUNC_RETURN tls_construct_encrypted_extensions(SSL_CONNECTION *s,
                                                           WPACKET *pkt)
 {
     OSSL_TIME start = ossl_time_now();
+    uint64_t start_us = ossl_time2us(start);
+    fprintf(stderr, "[%lu.%06lu] tls_construct_encrypted_extensions start\n",
+            (unsigned long)(start_us / 1000000),
+            (unsigned long)(start_us % 1000000));
 
     if (!tls_construct_extensions(s, pkt, SSL_EXT_TLS1_3_ENCRYPTED_EXTENSIONS,
                                   NULL, 0)) {
@@ -4416,6 +4444,10 @@ static CON_FUNC_RETURN tls_construct_encrypted_extensions(SSL_CONNECTION *s,
     fprintf(stderr, "TLS Encrypted Extensions construction time: %lu us\n",
             (unsigned long)elapsed);
     printf("\n===========================================================\n\n");
+    uint64_t end_us = ossl_time2us(end);
+    fprintf(stderr, "[%lu.%06lu] tls_construct_encrypted_extensions end\n",
+            (unsigned long)(end_us / 1000000),
+            (unsigned long)(end_us % 1000000));
 
     return CON_FUNC_SUCCESS;
 }

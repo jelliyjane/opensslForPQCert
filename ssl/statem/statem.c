@@ -923,20 +923,10 @@ static SUB_STATE_RETURN write_state_machine(SSL_CONNECTION *s)
             /* Fall through */
 
         case WRITE_STATE_SEND:
-            fprintf(stderr, "\n===== SEND Start =====\n\n"); fflush(stderr);
-
-            struct timeval start_time, end_time;
-            gettimeofday(&start_time, NULL);
             if (SSL_CONNECTION_IS_DTLS(s) && st->use_timer) {
                 dtls1_start_timer(s);
             }
             ret = statem_do_write(s);
-
-            gettimeofday(&end_time, NULL);
-            long ms = (end_time.tv_sec - start_time.tv_sec) * 1000000L
-                + (end_time.tv_usec - start_time.tv_usec);
-            fprintf(stderr, "\n===== SEND Time: %.3f=====\n\n", ms / 1000.0); fflush(stderr);
-
             if (ret <= 0) {
                 return SUB_STATE_ERROR;
             }

@@ -1191,6 +1191,10 @@ WORK_STATE ossl_statem_client_post_process_message(SSL_CONNECTION *s,
 CON_FUNC_RETURN tls_construct_client_hello(SSL_CONNECTION *s, WPACKET *pkt)
 {
     OSSL_TIME start = ossl_time_now();
+    uint64_t start_us = ossl_time2us(start);
+    fprintf(stderr, "[%lu.%06lu] tls_construct_client_hello start\n",
+            (unsigned long)(start_us / 1000000),
+            (unsigned long)(start_us % 1000000));
 
     unsigned char *p;
     size_t sess_id_len;
@@ -1381,6 +1385,10 @@ CON_FUNC_RETURN tls_construct_client_hello(SSL_CONNECTION *s, WPACKET *pkt)
     fprintf(stderr, "TLS ClientHello construction time: %lu us\n",
             (unsigned long)elapsed);
     printf("\n===========================================================\n\n");
+    uint64_t end_us = ossl_time2us(end);
+    fprintf(stderr, "[%lu.%06lu] tls_construct_client_hello end\n",
+            (unsigned long)(end_us / 1000000),
+            (unsigned long)(end_us % 1000000));
 
     return CON_FUNC_SUCCESS;
 }
@@ -1492,6 +1500,10 @@ static int set_client_ciphersuite(SSL_CONNECTION *s,
 MSG_PROCESS_RETURN tls_process_server_hello(SSL_CONNECTION *s, PACKET *pkt)
 {
     OSSL_TIME start = ossl_time_now();
+    uint64_t start_us = ossl_time2us(start);
+    fprintf(stderr, "[%lu.%06lu] tls_process_server_hello start\n",
+            (unsigned long)(start_us / 1000000),
+            (unsigned long)(start_us % 1000000));
 
     PACKET session_id, extpkt;
     size_t session_id_len;
@@ -1853,6 +1865,10 @@ MSG_PROCESS_RETURN tls_process_server_hello(SSL_CONNECTION *s, PACKET *pkt)
     fprintf(stderr, "TLS ServerHello process time: %lu us\n",
             (unsigned long)elapsed);
     printf("\n===========================================================\n\n");
+    uint64_t end_us = ossl_time2us(end);
+    fprintf(stderr, "[%lu.%06lu] tls_process_server_hello end\n",
+            (unsigned long)(end_us / 1000000),
+            (unsigned long)(end_us % 1000000));
 
     OPENSSL_free(extensions);
     return MSG_PROCESS_CONTINUE_READING;
@@ -2021,6 +2037,10 @@ MSG_PROCESS_RETURN tls_process_server_certificate(SSL_CONNECTION *s,
                                                   PACKET *pkt)
 {
     OSSL_TIME start = ossl_time_now();
+    uint64_t start_us = ossl_time2us(start);
+    fprintf(stderr, "[%lu.%06lu] tls_process_server_certificate start\n",
+            (unsigned long)(start_us / 1000000),
+            (unsigned long)(start_us % 1000000));
 
     unsigned long cert_list_len, cert_len;
     X509 *x = NULL;
@@ -2108,6 +2128,10 @@ MSG_PROCESS_RETURN tls_process_server_certificate(SSL_CONNECTION *s,
     fprintf(stderr, "TLS Server Certificate process time: %lu us\n",
             (unsigned long)elapsed);
     printf("\n===========================================================\n\n");
+    uint64_t end_us = ossl_time2us(end);
+    fprintf(stderr, "[%lu.%06lu] tls_process_server_certificate end\n",
+            (unsigned long)(end_us / 1000000),
+            (unsigned long)(end_us % 1000000));
 
     return MSG_PROCESS_CONTINUE_PROCESSING;
 
@@ -2127,6 +2151,10 @@ WORK_STATE tls_post_process_server_certificate(SSL_CONNECTION *s,
                                                WORK_STATE wst)
 {
     OSSL_TIME start = ossl_time_now();
+    uint64_t start_us = ossl_time2us(start);
+    fprintf(stderr, "[%lu.%06lu] tls_post_process_server_certificate start\n",
+            (unsigned long)(start_us / 1000000),
+            (unsigned long)(start_us % 1000000));
 
     X509 *x;
     EVP_PKEY *pkey = NULL;
@@ -2220,6 +2248,10 @@ WORK_STATE tls_post_process_server_certificate(SSL_CONNECTION *s,
     fprintf(stderr, "TLS Server Certificate post-process time: %lu us\n",
             (unsigned long)elapsed);
     printf("\n===========================================================\n\n");
+    uint64_t end_us = ossl_time2us(end);
+    fprintf(stderr, "[%lu.%06lu] tls_post_process_server_certificate end\n",
+            (unsigned long)(end_us / 1000000),
+            (unsigned long)(end_us % 1000000));
 
     return WORK_FINISHED_CONTINUE;
 }
