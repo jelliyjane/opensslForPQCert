@@ -2282,6 +2282,8 @@ int tls_handle_alpn(SSL_CONNECTION *s)
 
 WORK_STATE tls_post_process_client_hello(SSL_CONNECTION *s, WORK_STATE wst)
 {
+    OSSL_TIME start = ossl_time_now();
+
     const SSL_CIPHER *cipher;
     SSL *ssl = SSL_CONNECTION_GET_SSL(s);
     SSL *ussl = SSL_CONNECTION_GET_USER_SSL(s);
@@ -2396,6 +2398,13 @@ WORK_STATE tls_post_process_client_hello(SSL_CONNECTION *s, WORK_STATE wst)
     }
 #endif
 
+    OSSL_TIME end = ossl_time_now();
+    uint64_t elapsed = ossl_time2us(ossl_time_subtract(end, start));
+    printf("\n===========================================================\n\n");
+    fprintf(stderr, "TLS ClientHello process time: %lu us\n",
+            (unsigned long)elapsed);
+    printf("\n===========================================================\n\n");
+
     return WORK_FINISHED_STOP;
  err:
     return WORK_ERROR;
@@ -2403,8 +2412,8 @@ WORK_STATE tls_post_process_client_hello(SSL_CONNECTION *s, WORK_STATE wst)
 
 CON_FUNC_RETURN tls_construct_server_hello(SSL_CONNECTION *s, WPACKET *pkt)
 {
-    struct timeval start_time, end_time;
-    gettimeofday(&start_time, NULL);
+    OSSL_TIME start = ossl_time_now();
+
     int compm;
     size_t sl, len;
     int version;
@@ -2509,11 +2518,13 @@ CON_FUNC_RETURN tls_construct_server_hello(SSL_CONNECTION *s, WPACKET *pkt)
         /* SSLfatal() already called */;
         return CON_FUNC_ERROR;
     }
-    gettimeofday(&end_time, NULL);
-    long ms = (end_time.tv_sec - start_time.tv_sec) * 1000000L
-        + (end_time.tv_usec - start_time.tv_usec);
-    fprintf(stderr, "\n=====ServerHello Construct Time: %.3f=====\n\n", 
-        ms / 1000.0); fflush(stderr);
+    
+    OSSL_TIME end = ossl_time_now();
+    uint64_t elapsed = ossl_time2us(ossl_time_subtract(end, start));
+    printf("\n===========================================================\n\n");
+    fprintf(stderr, "TLS ServerHello construction time: %lu us\n",
+            (unsigned long)elapsed);
+    printf("\n===========================================================\n\n");
 
     return CON_FUNC_SUCCESS;
 }
@@ -3831,6 +3842,8 @@ MSG_PROCESS_RETURN tls_process_client_compressed_certificate(SSL_CONNECTION *sc,
 
 CON_FUNC_RETURN tls_construct_server_certificate(SSL_CONNECTION *s, WPACKET *pkt)
 {
+    OSSL_TIME start = ossl_time_now();
+
     CERT_PKEY *cpk = s->s3.tmp.cert;
 
     if (cpk == NULL) {
@@ -3863,6 +3876,13 @@ CON_FUNC_RETURN tls_construct_server_certificate(SSL_CONNECTION *s, WPACKET *pkt
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
         return 0;
     }
+
+    OSSL_TIME end = ossl_time_now();
+    uint64_t elapsed = ossl_time2us(ossl_time_subtract(end, start));
+    printf("\n===========================================================\n\n");
+    fprintf(stderr, "TLS Server Certificate construction time: %lu us\n",
+            (unsigned long)elapsed);
+    printf("\n===========================================================\n\n");
 
     return CON_FUNC_SUCCESS;
 }
@@ -4382,18 +4402,20 @@ MSG_PROCESS_RETURN tls_process_next_proto(SSL_CONNECTION *s, PACKET *pkt)
 static CON_FUNC_RETURN tls_construct_encrypted_extensions(SSL_CONNECTION *s,
                                                           WPACKET *pkt)
 {
-    struct timeval start_time, end_time;
-    gettimeofday(&start_time, NULL);
+    OSSL_TIME start = ossl_time_now();
+
     if (!tls_construct_extensions(s, pkt, SSL_EXT_TLS1_3_ENCRYPTED_EXTENSIONS,
                                   NULL, 0)) {
         /* SSLfatal() already called */
         return CON_FUNC_ERROR;
     }
-    gettimeofday(&end_time, NULL);
-    long ms = (end_time.tv_sec - start_time.tv_sec) * 1000000L
-        + (end_time.tv_usec - start_time.tv_usec);
-    fprintf(stderr, "\n=====EncryptedExtensions Construct Time: %.3f=====\n\n", 
-        ms / 1000.0); fflush(stderr);
+    
+    OSSL_TIME end = ossl_time_now();
+    uint64_t elapsed = ossl_time2us(ossl_time_subtract(end, start));
+    printf("\n===========================================================\n\n");
+    fprintf(stderr, "TLS Encrypted Extensions construction time: %lu us\n",
+            (unsigned long)elapsed);
+    printf("\n===========================================================\n\n");
 
     return CON_FUNC_SUCCESS;
 }
