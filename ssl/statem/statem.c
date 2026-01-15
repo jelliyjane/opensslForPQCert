@@ -351,6 +351,9 @@ static info_cb get_callback(SSL_CONNECTION *s)
  */
 static int state_machine(SSL_CONNECTION *s, int server)
 {
+    struct timeval start_time, end_time;
+    gettimeofday(&start_time, NULL);
+    
     BUF_MEM *buf = NULL;
     void (*cb) (const SSL *ssl, int type, int val) = NULL;
     OSSL_STATEM *st = &s->statem;

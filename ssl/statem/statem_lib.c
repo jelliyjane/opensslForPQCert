@@ -304,11 +304,6 @@ static int get_cert_verify_tbs_data(SSL_CONNECTION *s, unsigned char *tls13tbs,
         s->s3.tmp.hyb_tbs = malloc(s->s3.tmp.hash_len);
         memcpy(s->s3.tmp.hyb_tbs, tls13tbs, s->s3.tmp.hash_len);
 
-         printf("print tls13tbs\n");
-        for (size_t i = TLS13_TBS_PREAMBLE_SIZE; i < TLS13_TBS_PREAMBLE_SIZE + hashlen; i++) {
-            printf("%02x", *((tls13tbs)+i));
-        }
-        printf("\n");
     } else {
         size_t retlen;
         long retlen_l;
@@ -326,6 +321,12 @@ static int get_cert_verify_tbs_data(SSL_CONNECTION *s, unsigned char *tls13tbs,
 
 CON_FUNC_RETURN tls_construct_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
 {
+    OSSL_TIME start = ossl_time_now();
+    uint64_t start_us = ossl_time2us(start);
+    fprintf(stderr, "[%lu.%06lu] tls_construct_cert_verify start\n",
+            (unsigned long)(start_us / 1000000),
+            (unsigned long)(start_us % 1000000));
+
     EVP_PKEY *pkey = NULL;
     const EVP_MD *md = NULL;
     EVP_MD_CTX *mctx = NULL;
@@ -336,7 +337,6 @@ CON_FUNC_RETURN tls_construct_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
     unsigned char tls13tbs[TLS13_TBS_PREAMBLE_SIZE + EVP_MAX_MD_SIZE];
     const SIGALG_LOOKUP *lu = s->s3.tmp.sigalg;
     SSL_CTX *sctx = SSL_CONNECTION_GET_CTX(s);
-    printf("lu->sigalg: %s\n", lu->name);
     if (lu == NULL || s->s3.tmp.cert == NULL) {
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
         goto err;
@@ -416,13 +416,6 @@ CON_FUNC_RETURN tls_construct_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
             SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_EVP_LIB);
             goto err;
         }
-        printf("=== sig (%zu bytes) ===\n", siglen);
-        for (size_t i = 0; i < siglen; i++) {
-            printf("%02x", sig[i]);
-            if ((i + 1) % 16 == 0)
-                printf("\n");
-        }
-        printf("\n");
     }
 
 #ifndef OPENSSL_NO_GOST
@@ -446,6 +439,17 @@ CON_FUNC_RETURN tls_construct_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
         /* SSLfatal() already called */
         goto err;
     }
+    
+    OSSL_TIME end = ossl_time_now();
+    uint64_t elapsed = ossl_time2us(ossl_time_subtract(end, start));
+    printf("\n===========================================================\n\n");
+    fprintf(stderr, "TLS CertificateVerify construction time: %lu us\n",
+            (unsigned long)elapsed);
+    printf("\n===========================================================\n\n");
+    uint64_t end_us = ossl_time2us(end);
+    fprintf(stderr, "[%lu.%06lu] tls_construct_cert_verify end\n",
+            (unsigned long)(end_us / 1000000),
+            (unsigned long)(end_us % 1000000));
 
     OPENSSL_free(sig);
     EVP_MD_CTX_free(mctx);
@@ -459,6 +463,12 @@ CON_FUNC_RETURN tls_construct_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
 /* PQ Hybrid TLS Benchmarking */
 CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
 {
+    OSSL_TIME start = ossl_time_now();
+    uint64_t start_us = ossl_time2us(start);
+    fprintf(stderr, "[%lu.%06lu] tls_construct_pq_cert_verify start\n",
+            (unsigned long)(start_us / 1000000),
+            (unsigned long)(start_us % 1000000));
+
     EVP_PKEY *pkey = NULL;
     const EVP_MD *md = NULL;
     EVP_MD_CTX *mctx = NULL;
@@ -492,7 +502,6 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
         /* SSLfatal() already called */
         goto err;
     }
-    printf("lu->pq_sigalg: %s\n", lu->name);
     if (SSL_USE_SIGALGS(s) && !WPACKET_put_bytes_u16(pkt, lu->sigalg)) {
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
         goto err;
@@ -549,14 +558,6 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
             SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_EVP_LIB);
             goto err;
         }
-
-        printf("=== sig (%zu bytes) ===\n", siglen);
-        for (size_t i = 0; i < siglen; i++) {
-            printf("%02x", sig[i]);
-            if ((i + 1) % 16 == 0)
-                printf("\n");
-        }
-        printf("\n");
     }
 
 #ifndef OPENSSL_NO_GOST
@@ -581,6 +582,17 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
         goto err;
     }
 
+    OSSL_TIME end = ossl_time_now();
+    uint64_t elapsed = ossl_time2us(ossl_time_subtract(end, start));
+    printf("\n===========================================================\n\n");
+    fprintf(stderr, "TLS PQCertificateVerify construction time: %lu us\n",
+            (unsigned long)elapsed);
+    printf("\n===========================================================\n\n");
+    uint64_t end_us = ossl_time2us(end);
+    fprintf(stderr, "[%lu.%06lu] tls_construct_pq_cert_verify end\n",
+            (unsigned long)(end_us / 1000000),
+            (unsigned long)(end_us % 1000000));
+
     OPENSSL_free(sig);
     EVP_MD_CTX_free(mctx);
     return CON_FUNC_SUCCESS;
@@ -592,6 +604,12 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
 
 MSG_PROCESS_RETURN tls_process_cert_verify(SSL_CONNECTION *s, PACKET *pkt)
 {
+    OSSL_TIME start = ossl_time_now();
+    uint64_t start_us = ossl_time2us(start);
+    fprintf(stderr, "[%lu.%06lu] tls_process_cert_verify start\n",
+            (unsigned long)(start_us / 1000000),
+            (unsigned long)(start_us % 1000000));
+
     EVP_PKEY *pkey = NULL;
     const unsigned char *data;
 #ifndef OPENSSL_NO_GOST
@@ -717,24 +735,6 @@ MSG_PROCESS_RETURN tls_process_cert_verify(SSL_CONNECTION *s, PACKET *pkt)
             goto err;
         }
     }
-
-    printf("hdata (%zu bytes):\n", hdatalen);
-    for (size_t i = 0; i < hdatalen; i++) {
-        printf("%02x", ((unsigned char *)hdata)[i]);
-        if ((i + 1) % 16 == 0)
-            printf("\n");
-    }
-
-    printf("\n");
-
-    printf("data (%zu bytes):\n", len);
-    for (size_t i = 0; i < len; i++) {
-        printf("%02x", data[i]);
-        if ((i + 1) % 16 == 0)
-            printf("\n");
-    }
-
-    printf("\n");
     if (s->version == SSL3_VERSION) {
         if (EVP_DigestVerifyUpdate(mctx, hdata, hdatalen) <= 0
                 || EVP_MD_CTX_ctrl(mctx, EVP_CTRL_SSL3_MASTER_SECRET,
@@ -779,11 +779,29 @@ MSG_PROCESS_RETURN tls_process_cert_verify(SSL_CONNECTION *s, PACKET *pkt)
 #ifndef OPENSSL_NO_GOST
     OPENSSL_free(gost_data);
 #endif
+
+    OSSL_TIME end = ossl_time_now();
+    uint64_t elapsed = ossl_time2us(ossl_time_subtract(end, start));
+    printf("\n===========================================================\n\n");
+    fprintf(stderr, "TLS CertificateVerify process time: %lu us\n",
+            (unsigned long)elapsed);
+    printf("\n===========================================================\n\n");
+    uint64_t end_us = ossl_time2us(end);
+    fprintf(stderr, "[%lu.%06lu] tls_process_cert_verify end\n",
+            (unsigned long)(end_us / 1000000),
+            (unsigned long)(end_us % 1000000));
+
     return ret;
 }
 
 MSG_PROCESS_RETURN tls_process_pq_cert_verify(SSL_CONNECTION *s, PACKET *pkt)
 {
+    OSSL_TIME start = ossl_time_now();
+    uint64_t start_us = ossl_time2us(start);
+    fprintf(stderr, "[%lu.%06lu] tls_process_pq_cert_verify start\n",
+            (unsigned long)(start_us / 1000000),
+            (unsigned long)(start_us % 1000000));
+
     printf("tls_process_pq_cert_verify\n");
     EVP_PKEY *pkey = NULL;
     const unsigned char *data;
@@ -831,15 +849,12 @@ MSG_PROCESS_RETURN tls_process_pq_cert_verify(SSL_CONNECTION *s, PACKET *pkt)
                  SSL_R_SIGNATURE_FOR_NON_SIGNING_CERTIFICATE);
         goto err;
     }*/
-    printf("tls_process_pq_cert_verify2\n");
     if (SSL_USE_SIGALGS(s)) {
         unsigned int sigalg;
-        printf("tls_process_pq_cert_verify3\n");
         if (!PACKET_get_net_2(pkt, &sigalg)) {
             SSLfatal(s, SSL_AD_DECODE_ERROR, SSL_R_BAD_PACKET);
             goto err;
         }
-        printf("tls_process_pq_cert_verify4\n");
         if (tls12_check_peer_sigalg(s, sigalg, pkey) <= 0) {
             /* SSLfatal() already called */
             goto err;
@@ -896,23 +911,6 @@ MSG_PROCESS_RETURN tls_process_pq_cert_verify(SSL_CONNECTION *s, PACKET *pkt)
         goto err;
     }
 
-printf("hdata (%zu bytes):\n", hdatalen);
-for (size_t i = 0; i < hdatalen; i++) {
-    printf("%02x", ((unsigned char *)hdata)[i]);
-    if ((i + 1) % 16 == 0)
-        printf("\n");
-}
-printf("\n");
-
-    printf("data (%zu bytes):\n", len);
-    for (size_t i = 0; i < len; i++) {
-        printf("%02x", data[i]);
-        if ((i + 1) % 16 == 0)
-            printf("\n");
-    }
-
-    printf("\n");
-
     if (s->version == SSL3_VERSION) {
         if (EVP_DigestVerifyUpdate(mctx, hdata, hdatalen) <= 0
                 || EVP_MD_CTX_ctrl(mctx, EVP_CTRL_SSL3_MASTER_SECRET,
@@ -953,6 +951,18 @@ printf("\n");
 #ifndef OPENSSL_NO_GOST
     OPENSSL_free(gost_data);
 #endif
+
+    OSSL_TIME end = ossl_time_now();
+    uint64_t elapsed = ossl_time2us(ossl_time_subtract(end, start));
+    printf("\n===========================================================\n\n");
+    fprintf(stderr, "TLS PQCertificateVerify process time: %lu us\n",
+            (unsigned long)elapsed);
+    printf("\n===========================================================\n\n");
+    uint64_t end_us = ossl_time2us(end);
+    fprintf(stderr, "[%lu.%06lu] tls_process_pq_cert_verify end\n",
+            (unsigned long)(end_us / 1000000),
+            (unsigned long)(end_us % 1000000));
+
     return ret;
 }
 
@@ -1008,6 +1018,12 @@ int tls_process_pq_cert_verify_minimal(SSL_CONNECTION *s, PACKET *pkt)
 
 CON_FUNC_RETURN tls_construct_finished(SSL_CONNECTION *s, WPACKET *pkt)
 {
+    OSSL_TIME start = ossl_time_now();
+    uint64_t start_us = ossl_time2us(start);
+    fprintf(stderr, "[%lu.%06lu] tls_construct_finished start\n",
+            (unsigned long)(start_us / 1000000),
+            (unsigned long)(start_us % 1000000));
+
     size_t finish_md_len;
     const char *sender;
     size_t slen;
@@ -1084,6 +1100,17 @@ CON_FUNC_RETURN tls_construct_finished(SSL_CONNECTION *s, WPACKET *pkt)
                finish_md_len);
         s->s3.previous_server_finished_len = finish_md_len;
     }
+
+    OSSL_TIME end = ossl_time_now();
+    uint64_t elapsed = ossl_time2us(ossl_time_subtract(end, start));
+    printf("\n===========================================================\n\n");
+    fprintf(stderr, "TLS Finished construction time: %lu us\n",
+            (unsigned long)elapsed);
+    printf("\n===========================================================\n\n");
+    uint64_t end_us = ossl_time2us(end);
+    fprintf(stderr, "[%lu.%06lu] tls_construct_finished end\n",
+            (unsigned long)(end_us / 1000000),
+            (unsigned long)(end_us % 1000000));
 
     return CON_FUNC_SUCCESS;
 }
@@ -1232,6 +1259,12 @@ MSG_PROCESS_RETURN tls_process_change_cipher_spec(SSL_CONNECTION *s,
 
 MSG_PROCESS_RETURN tls_process_finished(SSL_CONNECTION *s, PACKET *pkt)
 {
+    OSSL_TIME start = ossl_time_now();
+    uint64_t start_us = ossl_time2us(start);
+    fprintf(stderr, "[%lu.%06lu] tls_process_finished start\n",
+            (unsigned long)(start_us / 1000000),
+            (unsigned long)(start_us % 1000000));
+
     size_t md_len;
     SSL *ssl = SSL_CONNECTION_GET_SSL(s);
     int was_first = SSL_IS_FIRST_HANDSHAKE(s);
@@ -1348,6 +1381,17 @@ MSG_PROCESS_RETURN tls_process_finished(SSL_CONNECTION *s, PACKET *pkt)
             && !SSL_IS_FIRST_HANDSHAKE(s)
             && s->rlayer.rrlmethod->set_first_handshake != NULL)
         s->rlayer.rrlmethod->set_first_handshake(s->rlayer.rrl, 0);
+
+    OSSL_TIME end = ossl_time_now();
+    uint64_t elapsed = ossl_time2us(ossl_time_subtract(end, start));
+    printf("\n===========================================================\n\n");
+    fprintf(stderr, "TLS Finished process time: %lu us\n",
+            (unsigned long)elapsed);
+    printf("\n===========================================================\n\n");
+    uint64_t end_us = ossl_time2us(end);
+    fprintf(stderr, "[%lu.%06lu] tls_process_finished end\n",
+            (unsigned long)(end_us / 1000000),
+            (unsigned long)(end_us % 1000000));
 
     return MSG_PROCESS_FINISHED_READING;
 }
