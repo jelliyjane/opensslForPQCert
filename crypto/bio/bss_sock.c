@@ -127,11 +127,6 @@ static int sock_read(BIO *b, char *out, int outl)
         else
 # endif
             ret = readsocket(b->num, out, outl);
-        OSSL_TIME start = ossl_time_now();
-        uint64_t start_us = ossl_time2us(start);
-        fprintf(stderr, "[%lu.%06lu] tls_construct_finished start\n",
-            (unsigned long)(start_us / 1000000),
-            (unsigned long)(start_us % 1000000));
         BIO_clear_retry_flags(b);
         if (ret <= 0) {
             if (BIO_sock_should_retry(ret))
@@ -140,6 +135,13 @@ static int sock_read(BIO *b, char *out, int outl)
                 b->flags |= BIO_FLAGS_IN_EOF;
         }
     }
+
+    OSSL_TIME start = ossl_time_now();
+    uint64_t start_us = ossl_time2us(start);
+    fprintf(stderr, "[%lu.%06lu] socket read\n",
+        (unsigned long)(start_us / 1000000),
+        (unsigned long)(start_us % 1000000));
+    
     return ret;
 }
 
@@ -172,18 +174,18 @@ static int sock_write(BIO *b, const char *in, int inl)
     } else
 # endif
         ret = writesocket(b->num, in, inl);
-
-    OSSL_TIME start = ossl_time_now();
-    uint64_t start_us = ossl_time2us(start);
-    fprintf(stderr, "[%lu.%06lu] tls_construct_finished start\n",
-        (unsigned long)(start_us / 1000000),
-        (unsigned long)(start_us % 1000000));
-
     BIO_clear_retry_flags(b);
     if (ret <= 0) {
         if (BIO_sock_should_retry(ret))
             BIO_set_retry_write(b);
     }
+
+    OSSL_TIME start = ossl_time_now();
+    uint64_t start_us = ossl_time2us(start);
+    fprintf(stderr, "[%lu.%06lu] socket write\n",
+        (unsigned long)(start_us / 1000000),
+        (unsigned long)(start_us % 1000000));
+    
     return ret;
 }
 
