@@ -343,6 +343,10 @@ static int state_machine(SSL_CONNECTION *s, int server) {
   SSL *ssl = SSL_CONNECTION_GET_SSL(s);
   SSL *ussl = SSL_CONNECTION_GET_USER_SSL(s);
 
+  /* Catalyst logging variables */
+  OSSL_TIME now;
+  uint64_t sec, usec;
+
   if (st->state == MSG_FLOW_ERROR) {
     /* Shouldn't have been called if we're already in the error state */
     return -1;
@@ -453,9 +457,9 @@ static int state_machine(SSL_CONNECTION *s, int server) {
     }
 
     /* Catalyst logging: State machine initialization */
-    OSSL_TIME now = ossl_time_now();
-    uint64_t sec = ossl_time2seconds(now);
-    uint64_t usec = ossl_time2us(now) % 1000000;
+    now = ossl_time_now();
+    sec = ossl_time2seconds(now);
+    usec = ossl_time2us(now) % 1000000;
     fprintf(stderr,
             "[CATALYST] %llu.%06llu state_machine: INIT, server=%d, "
             "hand_state=%d\n",
