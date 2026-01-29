@@ -1010,7 +1010,7 @@ WORK_STATE ossl_statem_server_post_work(SSL_CONNECTION *s, WORK_STATE wst)
         break;
 
     case TLS_ST_SW_PQCERT_VRFY:
-	break;
+        break;
 
     case TLS_ST_SW_FINISHED:
         if (statem_flush(s) != 1)
