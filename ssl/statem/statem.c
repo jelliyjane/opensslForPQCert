@@ -750,6 +750,11 @@ static SUB_STATE_RETURN read_state_machine(SSL_CONNECTION *s)
  */
 static int statem_do_write(SSL_CONNECTION *s)
 {
+    OSSL_TIME start = ossl_time_now();
+    uint64_t start_us = ossl_time2us(start);
+    fprintf(stderr, "[%lu.%06lu] statem_do_write start\n",
+            (unsigned long)(start_us / 1000000),
+            (unsigned long)(start_us % 1000000));
     OSSL_STATEM *st = &s->statem;
 
     if (st->hand_state == TLS_ST_CW_CHANGE
