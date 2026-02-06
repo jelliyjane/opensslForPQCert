@@ -14,7 +14,8 @@
 
 static const X509V3_EXT_METHOD *standard_exts[] = {
     &ossl_v3_nscert,
-    &ossl_v3_ns_ia5_list[0],
+    &ossl_v3_alt_sig_alg,
+    &ossl_v3_alt_sig_val,
     &ossl_v3_ns_ia5_list[1],
     &ossl_v3_ns_ia5_list[2],
     &ossl_v3_ns_ia5_list[3],
@@ -43,6 +44,8 @@ static const X509V3_EXT_METHOD *standard_exts[] = {
     &ossl_v3_addr,
     &ossl_v3_asid,
 #endif
+    &ossl_v3_alt_sig_alg,  /* Catalyst: id-ce-altSignatureAlgorithm */
+    &ossl_v3_alt_sig_val,  /* Catalyst: id-ce-altSignatureValue */
 #ifndef OPENSSL_NO_OCSP
     &ossl_v3_ocsp_nonce,
     &ossl_v3_ocsp_crlid,

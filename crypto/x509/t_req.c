@@ -14,6 +14,7 @@
 #include <openssl/objects.h>
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
+#include <openssl/v3_dcd.h>
 #include <openssl/rsa.h>
 #include <openssl/dsa.h>
 
@@ -152,6 +153,12 @@ int X509_REQ_print_ex(BIO *bp, X509_REQ *x, unsigned long nmflags,
                         goto err;
                     if (BIO_puts(bp, "\n") <= 0)
                         goto err;
+                    break;
+                case V_ASN1_SEQUENCE:
+                    BIO_puts(bp, "unable to print attribute\n");
+                    break;
+                case V_ASN1_BIT_STRING:
+                    BIO_puts(bp, "unable to print attribute\n");
                     break;
                 default:
                     if (BIO_puts(bp, "unable to print attribute\n") <= 0)

@@ -1438,12 +1438,13 @@ static int ssl_add_cert_chain(SSL_CONNECTION *s, WPACKET *pkt, CERT_PKEY *cpk,
   else
     extra_certs = sctx->extra_certs;
 
-  if ((s->mode & SSL_MODE_NO_AUTO_CHAIN) || extra_certs)
+  if ((s->mode & SSL_MODE_NO_AUTO_CHAIN) || extra_certs) {
     chain_store = NULL;
-  else if (s->cert->chain_store)
+  } else if (s->cert->chain_store) {
     chain_store = s->cert->chain_store;
-  else
+  } else {
     chain_store = sctx->cert_store;
+  }
 
   if (chain_store != NULL) {
     X509_STORE_CTX *xs_ctx = X509_STORE_CTX_new_ex(sctx->libctx, sctx->propq);
@@ -1492,6 +1493,38 @@ static int ssl_add_cert_chain(SSL_CONNECTION *s, WPACKET *pkt, CERT_PKEY *cpk,
         return 0;
       }
     }
+
+    /* [Chameleon] If Chameleon cert, try to find and append PQ ICA from store */
+    if (s->ssl.hybrid_hint.selected_type == HYBCERT_CHAMELEON) {
+        int crit = -1;
+        DeltaCertificateDescriptor *dcd = X509_get_ext_d2i(cpk->x509, NID_id_ce_deltaCertificateDescriptor, &crit, NULL);
+        if (dcd != NULL && dcd->issuer != NULL) {
+            X509_OBJECT *obj = X509_OBJECT_new();
+            if (obj != NULL) {
+                if (X509_STORE_get_by_subject(xs_ctx, X509_LU_X509, dcd->issuer, obj) > 0) {
+                    X509 *pq_ica = X509_OBJECT_get0_X509(obj);
+                    /* Check duplicate */
+                    int redundant = 0;
+                    for (int k = 0; k < chain_count; k++) {
+                        if (X509_cmp(sk_X509_value(chain, k), pq_ica) == 0) {
+                            redundant = 1;
+                            break;
+                        }
+                    }
+                    if (!redundant) {
+                        if (!ssl_add_cert_to_wpacket(s, pkt, pq_ica, chain_count, for_comp)) {
+                             X509_OBJECT_free(obj);
+                             DeltaCertificateDescriptor_free(dcd);
+                             X509_STORE_CTX_free(xs_ctx);
+                             return 0;
+                        }
+                    }
+                }
+                X509_OBJECT_free(obj);
+            }
+            DeltaCertificateDescriptor_free(dcd);
+        }
+    }
     X509_STORE_CTX_free(xs_ctx);
   } else {
     i = ssl_security_cert_chain(s, extra_certs, x, 0);
@@ -1524,6 +1557,7 @@ EVP_PKEY *tls_get_peer_pkey(const SSL_CONNECTION *sc) {
 }
 
 EVP_PKEY *tls_get_peer_delta_pkey(const SSL_CONNECTION *sc) {
+  SSL_CTX *sctx = SSL_CONNECTION_GET_CTX(sc);
   printf("Server type: %d\n", sc->ssl.hybrid_hint.selected_type);
   if (sc->session->peer_rpk != NULL) {
     return sc->session->peer_rpk;
@@ -1532,8 +1566,12 @@ EVP_PKEY *tls_get_peer_delta_pkey(const SSL_CONNECTION *sc) {
     int crit = -1;
     if (sc->ssl.hybrid_hint.selected_type == HYBCERT_CHAMELEON) {
       printf("Certificate Type: Chameleon\n");
+      
+      /* PQ chain was already verified in tls_post_process_server_certificate */
+      /* Just extract the DCD and return the Delta public key */
       DeltaCertificateDescriptor *dcd = X509_get_ext_d2i(
           sc->session->peer, NID_id_ce_deltaCertificateDescriptor, &crit, NULL);
+      if (dcd == NULL) return NULL;
       return X509_PUBKEY_get0(dcd->SubjectPublicKeyInfo);
     } else if (sc->ssl.hybrid_hint.selected_type == HYBCERT_CATALYST) {
       printf("Certificate Type: Catalyst\n");

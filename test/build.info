@@ -1223,7 +1223,8 @@ ENDIF
    my @nogo_headers = ( "asn1_mac.h",
                         "opensslconf.h",
                         "__decc_include_prologue.h",
-                        "__decc_include_epilogue.h" );
+                        "__decc_include_epilogue.h",
+                        "v3_dcd.h" );
    my @nogo_headers_re = ( qr/.*err\.h/ );
    my @headerfiles = glob catfile($sourcedir,
                                   updir(), "include", "openssl", "*.h");

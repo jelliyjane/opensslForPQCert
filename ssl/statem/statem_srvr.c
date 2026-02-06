@@ -1695,6 +1695,7 @@ MSG_PROCESS_RETURN tls_process_client_hello(SSL_CONNECTION *s, PACKET *pkt)
 
 static int tls_early_post_process_client_hello(SSL_CONNECTION *s)
 {
+    fprintf(stderr, "[DEBUG] tls_early start\n");
     unsigned int j;
     int i, al = SSL_AD_INTERNAL_ERROR;
     int protverr;
@@ -1750,6 +1751,7 @@ static int tls_early_post_process_client_hello(SSL_CONNECTION *s)
     }
 
     /* Choose the server SSL/TLS/DTLS version. */
+    fprintf(stderr, "[DEBUG] calling ssl_choose_server_version\n");
     protverr = ssl_choose_server_version(s, clienthello, &dgrd);
 
     if (protverr) {
@@ -1831,6 +1833,7 @@ static int tls_early_post_process_client_hello(SSL_CONNECTION *s)
 
     /* For TLSv1.3 we must select the ciphersuite *before* session resumption */
     if (SSL_CONNECTION_IS_TLS13(s)) {
+        fprintf(stderr, "[DEBUG] TLS 1.3: calling ssl3_choose_cipher\n");
         const SSL_CIPHER *cipher =
             ssl3_choose_cipher(s, ciphers, SSL_get_ciphers(ssl));
 
@@ -2324,9 +2327,11 @@ WORK_STATE tls_post_process_client_hello(SSL_CONNECTION *s, WORK_STATE wst)
 
             /* In TLSv1.3 we selected the ciphersuite before resumption */
             if (!SSL_CONNECTION_IS_TLS13(s)) {
+                fprintf(stderr, "[DEBUG] calling ssl3_choose_cipher\n");
                 cipher =
                     ssl3_choose_cipher(s, s->peer_ciphers,
                                        SSL_get_ciphers(ssl));
+                fprintf(stderr, "[DEBUG] ssl3_choose_cipher returned %p\n", cipher);
 
                 if (cipher == NULL) {
                     SSLfatal(s, SSL_AD_HANDSHAKE_FAILURE,
@@ -2336,10 +2341,13 @@ WORK_STATE tls_post_process_client_hello(SSL_CONNECTION *s, WORK_STATE wst)
                 s->s3.tmp.new_cipher = cipher;
             }
             if (!s->hit) {
+                fprintf(stderr, "[DEBUG] calling tls_choose_sigalg\n");
                 if (!tls_choose_sigalg(s, 1)) {
+                    fprintf(stderr, "[DEBUG] tls_choose_sigalg failed\n");
                     /* SSLfatal already called */
                     goto err;
                 }
+                fprintf(stderr, "[DEBUG] tls_choose_sigalg success\n");
                 /* check whether we should disable session resumption */
                 if (s->not_resumable_session_cb != NULL)
                     s->session->not_resumable =

@@ -99,6 +99,7 @@ static const ssl_trace_tbl ssl_handshake_tbl[] = {
     {SSL3_MT_SUPPLEMENTAL_DATA, "SupplementalData"},
     {SSL3_MT_KEY_UPDATE, "KeyUpdate"},
     {SSL3_MT_COMPRESSED_CERTIFICATE, "CompressedCertificate"},
+    {SSL3_MT_PQ_CERTIFICATE_VERIFY, "PQCertificateVerify"},
 # ifndef OPENSSL_NO_NEXTPROTONEG
     {SSL3_MT_NEXT_PROTO, "NextProto"},
 # endif

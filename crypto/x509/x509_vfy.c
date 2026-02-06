@@ -266,7 +266,6 @@ static int verify_chain(X509_STORE_CTX *ctx)
 #endif
 
     // Verify alternative signatures
-    printf("[verify_chain] start\n");
     if ((ok = X509v3_alt_sig_validate_path(ctx)) == 0)
         return ok;
 

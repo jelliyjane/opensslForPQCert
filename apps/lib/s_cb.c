@@ -631,6 +631,7 @@ static STRINT_PAIR handshakes[] = {
     {", SupplementalData", SSL3_MT_SUPPLEMENTAL_DATA},
     {", KeyUpdate", SSL3_MT_KEY_UPDATE},
     {", CompressedCertificate", SSL3_MT_COMPRESSED_CERTIFICATE},
+    {", PQCertificateVerify", SSL3_MT_PQ_CERTIFICATE_VERIFY},
 #ifndef OPENSSL_NO_NEXTPROTONEG
     {", NextProto", SSL3_MT_NEXT_PROTO},
 #endif

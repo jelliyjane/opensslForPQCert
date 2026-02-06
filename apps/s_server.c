@@ -1826,8 +1826,19 @@ int s_server_main(int argc, char *argv[])
         if (s_key == NULL)
             goto end;
 
-        s_cert = load_cert_pass(s_cert_file, s_cert_format, 1, pass,
-                                "server certificate");
+        if (s_cert_file != NULL) {
+            STACK_OF(X509) *bundle = NULL;
+            if (!load_certs(s_cert_file, 0, &bundle, NULL, "server certificate bundle"))
+                goto end;
+            if (sk_X509_num(bundle) > 0) {
+                s_cert = sk_X509_shift(bundle);
+                if (s_chain == NULL && sk_X509_num(bundle) > 0) {
+                    s_chain = bundle;
+                    bundle = NULL;
+                }
+            }
+            sk_X509_pop_free(bundle, X509_free);
+        }
 
         if (s_cert == NULL)
             goto end;
@@ -2490,18 +2501,6 @@ static int sv_body(int s, int stype, int prot, unsigned char *context)
         goto err;
     }
 
-    if (s_hybcert_type != HYBCERT_NONE) {
-        if(!SSL_set_server_hybrid_cert_type(con, (unsigned char)s_hybcert_type)) {
-            BIO_printf(bio_err, "failed to set hybrid cert hint\n");
-            goto err;
-        }
-    }
-
-    if (!SSL_set_hybrid_private_key(con, tmp_hyb_pkey)) {
-        BIO_printf(bio_err, "Failed to set hybrid private key on SSL_CTX\n");
-        goto err;
-    }
-
     if (s_tlsextdebug) {
         SSL_set_tlsext_debug_callback(con, tlsext_cb);
         SSL_set_tlsext_debug_arg(con, bio_s_out);
@@ -2518,6 +2517,18 @@ static int sv_body(int s, int stype, int prot, unsigned char *context)
     if (!SSL_clear(con)) {
         BIO_printf(bio_err, "Error clearing SSL connection\n");
         ret = -1;
+        goto err;
+    }
+
+    if (s_hybcert_type != HYBCERT_NONE) {
+        if(!SSL_set_server_hybrid_cert_type(con, (unsigned char)s_hybcert_type)) {
+            BIO_printf(bio_err, "failed to set hybrid cert hint\n");
+            goto err;
+        }
+    }
+
+    if (!SSL_set_hybrid_private_key(con, tmp_hyb_pkey)) {
+        BIO_printf(bio_err, "Failed to set hybrid private key on SSL_CTX\n");
         goto err;
     }
 #ifndef OPENSSL_NO_DTLS
@@ -3236,6 +3247,10 @@ static int www_body(int s, int stype, int prot, unsigned char *context)
             goto err;
         }
     }
+    if (!SSL_set_hybrid_private_key(con, tmp_hyb_pkey)) {
+        BIO_printf(bio_err, "Failed to set hybrid private key on SSL\n");
+        goto err;
+    }
 
     if (s_tlsextdebug) {
         SSL_set_tlsext_debug_callback(con, tlsext_cb);
@@ -3665,6 +3680,17 @@ static int rev_body(int s, int stype, int prot, unsigned char *context)
 
     if ((con = SSL_new(ctx)) == NULL)
         goto err;
+
+    if (s_hybcert_type != HYBCERT_NONE) {
+        if(!SSL_set_server_hybrid_cert_type(con, (unsigned char)s_hybcert_type)) {
+            BIO_printf(bio_err, "failed to set hybrid cert hint\n");
+            goto err;
+        }
+    }
+    if (!SSL_set_hybrid_private_key(con, tmp_hyb_pkey)) {
+        BIO_printf(bio_err, "Failed to set hybrid private key on SSL\n");
+        goto err;
+    }
 
     if (s_tlsextdebug) {
         SSL_set_tlsext_debug_callback(con, tlsext_cb);

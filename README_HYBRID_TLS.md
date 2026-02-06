@@ -52,7 +52,7 @@ This implementation extends OpenSSL 3.3.4 to integrate PQC algorithms via the OQ
 ```bash
 git clone -b develop https://github.com/jelliyjane/opensslForPQCert.git
 cd opensslForPQCert
-./config --prefix=/usr/local/ssl --openssldir=/usr/local/ssl
+./config --prefix=/usr/local/ssl --openssldir=/usr/local/ssl --libdir=lib
 make -j$(nproc)
 sudo make install
 ```

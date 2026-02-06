@@ -30,6 +30,7 @@
 #ifndef OPENSSL_NO_DSA
 # include <openssl/dsa.h>
 #endif
+#include <openssl/v3_dcd.h>
 
 #define BITS               "default_bits"
 #define KEYFILE            "default_keyfile"
@@ -846,6 +847,7 @@ int req_main(int argc, char **argv)
                 goto end;
             }
 
+
             /* If a pre-cert was requested, we need to add a poison extension */
             if (precert) {
                 if (X509_add1_ext_i2d(new_x509, NID_ct_precert_poison,
@@ -883,6 +885,7 @@ int req_main(int argc, char **argv)
                 BIO_printf(bio_err, "Error adding request extensions defined via -addext\n");
                 goto end;
             }
+            
             i = do_X509_REQ_sign(req, pkey, digest, sigopts);
             if (!i)
                 goto end;
@@ -923,6 +926,7 @@ int req_main(int argc, char **argv)
 	    goto end;
         } else /* i > 0 */
             BIO_printf(bio_out, "Certificate request self-signature verify OK\n");
+
     }
 
     if (noout && !text && !modulus && !subject && !pubkey) {

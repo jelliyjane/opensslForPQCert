@@ -20,6 +20,7 @@
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
 #include <openssl/objects.h>
+#include <openssl/v3_dcd.h>
 #include <openssl/pem.h>
 #include <openssl/rsa.h>
 #ifndef OPENSSL_NO_DSA
@@ -54,7 +55,8 @@ typedef enum OPTION_choice {
     OPT_CLRREJECT, OPT_ALIAS, OPT_CACREATESERIAL, OPT_CLREXT, OPT_OCSPID,
     OPT_SUBJECT_HASH_OLD, OPT_ISSUER_HASH_OLD, OPT_COPY_EXTENSIONS,
     OPT_BADSIG, OPT_MD, OPT_ENGINE, OPT_NOCERT, OPT_PRESERVE_DATES,
-    OPT_R_ENUM, OPT_PROV_ENUM, OPT_EXT
+    OPT_R_ENUM, OPT_PROV_ENUM, OPT_EXT,
+    OPT_DELTACERT
 } OPTION_CHOICE;
 
 const OPTIONS x509_options[] = {
@@ -177,10 +179,10 @@ const OPTIONS x509_options[] = {
      "Reject certificate for a given purpose"},
 
     OPT_R_OPTIONS,
-#ifndef OPENSSL_NO_ENGINE
-    {"engine", OPT_ENGINE, 's', "Use engine, possibly a hardware device"},
-#endif
+
     OPT_PROV_OPTIONS,
+    OPT_SECTION("Delta Certificate (Hybrid/Chameleon)"),
+    {"delta_cert", OPT_DELTACERT, '<', "Pre-issued Delta Certificate file"},
     {NULL}
 };
 
@@ -263,6 +265,8 @@ int x509_main(int argc, char **argv)
     int ext_copy = EXT_COPY_UNSET;
     X509V3_CTX ext_ctx;
     EVP_PKEY *privkey = NULL, *CAkey = NULL, *pubkey = NULL;
+    X509 *deltacert = NULL;
+    char *deltacertfile = NULL;
     EVP_PKEY *pkey;
     int newcert = 0;
     char *issu = NULL, *subj = NULL, *digest = NULL;
@@ -598,6 +602,9 @@ int x509_main(int argc, char **argv)
         case OPT_MD:
             digest = opt_unknown();
             break;
+        case OPT_DELTACERT:
+            deltacertfile = opt_arg();
+            break;
         }
     }
     /* No extra arguments. */
@@ -746,6 +753,12 @@ int x509_main(int argc, char **argv)
                        "We need a private key to sign with, use -key or -CAkey or -CA with private key\n");
             goto err;
         }
+        if (deltacertfile != NULL && deltacert == NULL) {
+             deltacert = load_cert(deltacertfile, FORMAT_PEM, "Delta Certificate");
+             if (deltacert == NULL)
+                 goto end;
+        }
+
         if ((x = X509_new_ex(app_get0_libctx(), app_get0_propq())) == NULL)
             goto end;
         if (CAfile == NULL && sno == NULL) {
@@ -906,21 +919,89 @@ int x509_main(int argc, char **argv)
             }
         }
         noout = 1;
-    } else if (CAfile != NULL) {
-        if ((CAkey = load_key(CAkeyfile, CAkeyformat,
-                              0, passin, e, "CA private key")) == NULL)
-            goto end;
-        if (!X509_check_private_key(xca, CAkey)) {
-            BIO_printf(bio_err,
-                       "CA certificate and CA private key do not match\n");
-            goto err;
+    } else {
+        if (CAfile != NULL && CAkey == NULL) {
+            if ((CAkey = load_key(CAkeyfile, CAkeyformat,
+                                  0, passin, e, "CA private key")) == NULL)
+                goto end;
+            if (!X509_check_private_key(xca, CAkey)) {
+                BIO_printf(bio_err,
+                           "CA certificate and CA private key do not match\n");
+                goto err;
+            }
         }
 
-        if (!do_X509_sign(x, 0, CAkey, digest, sigopts, &ext_ctx))
-            goto end;
-    } else if (privkey != NULL) {
-        if (!do_X509_sign(x, 0, privkey, digest, sigopts, &ext_ctx))
-            goto end;
+        /* Delta Certificate Support: Check for DCR and add DCD extension */
+        if (req != NULL) {
+            if (deltacertfile != NULL && deltacert == NULL) {
+                 deltacert = load_cert(deltacertfile, FORMAT_PEM, "Delta Certificate");
+                 if (deltacert == NULL)
+                     goto end;
+            }
+
+            /*
+               The DCD extension binds to the certificate it resides in.
+               Thus, base_ref should be the certificate being issued (x).
+            */
+            X509 *base_ref = x;
+
+            /* We don't need DCR from REQ for Draft-compliant issuance if we have the delta cert,
+               BUT the DCR presence verification is still a good check. 
+               However, create_delta_certificate_descriptor now only needs base_cert and delta_cert.
+            */
+            if (deltacert) {
+                 ASN1_OCTET_STRING *dcd_val = create_delta_certificate_descriptor(base_ref, deltacert);
+
+                 if (dcd_val) {
+                      /* Add DCD extension (OID: 2.16.840.1.114027.80.6.1) */
+                      int nid_dcd = OBJ_txt2nid("deltaCertificateDescriptor");
+                      if (nid_dcd == NID_undef)
+                          nid_dcd = OBJ_create("2.16.840.1.114027.80.6.1", "deltaCertificateDescriptor", "Delta Certificate Descriptor");
+
+                      if (nid_dcd != NID_undef) {
+                          X509_EXTENSION *ex = X509_EXTENSION_create_by_NID(NULL, nid_dcd, 0, dcd_val);
+                          if (ex != NULL) {
+                              X509_add_ext(x, ex, -1);
+                              X509_EXTENSION_free(ex);
+                          }
+                      }
+                      ASN1_OCTET_STRING_free(dcd_val);
+                 }
+            }
+
+            /* Explicitly copy extensions from CSR to Certificate (for Catalyst/PQC support) */
+            /* This ensures subjectAltPublicKeyInfo, altSignatureAlgorithm, etc. are preserved. */
+            STACK_OF(X509_EXTENSION) *exts = X509_REQ_get_extensions(req);
+            if (exts) {
+                int i;
+                for (i = 0; i < sk_X509_EXTENSION_num(exts); i++) {
+                    X509_EXTENSION *ext = sk_X509_EXTENSION_value(exts, i);
+                    /* Check if extension already exists (e.g. from config) to avoid duplicates/conflicts */
+                    int nid = OBJ_obj2nid(X509_EXTENSION_get_object(ext));
+                    if (nid == NID_undef || X509_get_ext_by_NID(x, nid, -1) == -1) {
+                         X509_add_ext(x, ext, -1);
+                    }
+                }
+                sk_X509_EXTENSION_pop_free(exts, X509_EXTENSION_free);
+            }
+        }
+
+        /* Reorder extensions: Ensure altSignatureValue is the last extension */
+        int alt_sig_idx = X509_get_ext_by_NID(x, NID_alt_signature_value, -1);
+        if (alt_sig_idx != -1 && alt_sig_idx < X509_get_ext_count(x) - 1) {
+            X509_EXTENSION *ex = X509_delete_ext(x, alt_sig_idx);
+            X509_add_ext(x, ex, -1); /* Appends to end */
+            X509_EXTENSION_free(ex);
+        }
+
+        if (CAfile != NULL) {
+            if (!do_X509_sign(x, 0, CAkey, digest, sigopts, &ext_ctx))
+                goto end;
+        } else if (privkey != NULL) {
+            if (!do_X509_sign(x, 0, privkey, digest, sigopts, &ext_ctx))
+                goto end;
+        }
+
     }
     if (badsig) {
         const ASN1_BIT_STRING *signature;
@@ -1096,11 +1177,13 @@ int x509_main(int argc, char **argv)
     X509_NAME_free(fissu);
     X509_NAME_free(fsubj);
     X509_REQ_free(req);
+    X509_free(deltacert);
     X509_free(x);
     X509_free(xca);
     EVP_PKEY_free(privkey);
     EVP_PKEY_free(CAkey);
     EVP_PKEY_free(pubkey);
+
     sk_OPENSSL_STRING_free(sigopts);
     sk_OPENSSL_STRING_free(vfyopts);
     X509_REQ_free(rq);

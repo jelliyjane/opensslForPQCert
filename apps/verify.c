@@ -301,7 +301,7 @@ static int check(X509_STORE *ctx, const char *file,
     if (i > 0 && X509_STORE_CTX_get_error(csc) == X509_V_OK) {
         BIO_printf(bio_out, "%s: OK\n", (file == NULL) ? "stdin" : file);
         if (v_dcd_verify) {
-            if (!verify_dcd_signature(x)) {
+            if (!verify_dcd_signature(x, ctx, uchain)) {
                 BIO_printf(bio_err, "DeltaCertificateDescriptor verification failed\n");
                 ret = 0;
                 goto end;
