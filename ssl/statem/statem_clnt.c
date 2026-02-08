@@ -26,6 +26,7 @@
 #include <openssl/trace.h>
 #include <openssl/core_names.h>
 #include <openssl/param_build.h>
+#include <openssl/v3_dcd.h>
 #include "internal/cryptlib.h"
 
 static MSG_PROCESS_RETURN tls_process_as_hello_retry_request(SSL_CONNECTION *s,
@@ -2199,6 +2200,18 @@ WORK_STATE tls_post_process_server_certificate(SSL_CONNECTION *s,
      * which we don't include in statem_srvr.c
      */
     x = sk_X509_value(s->session->peer_chain, 0);
+
+    /* For Chameleon certificates, verify the PQ chain now */
+    if (s->ssl.hybrid_hint.selected_type == HYBCERT_CHAMELEON) {
+        SSL_CTX *sctx = SSL_CONNECTION_GET_CTX(s);
+        printf("[Chameleon] Verifying PQ chain during certificate processing\n");
+        if (!verify_dcd_signature(x, sctx->cert_store, s->session->peer_chain)) {
+            printf("[Chameleon] PQ chain verification failed\n");
+            SSLfatal(s, SSL_AD_CERTIFICATE_UNKNOWN, SSL_R_CERTIFICATE_VERIFY_FAILED);
+            return WORK_ERROR;
+        }
+        printf("[Chameleon] PQ chain verification completed successfully\n");
+    }
 
     pkey = X509_get0_pubkey(x);
 

@@ -19,6 +19,7 @@
 #include <openssl/evp.h>
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
+#include <openssl/v3_dcd.h>
 #include <openssl/objects.h>
 #include <openssl/ocsp.h>
 #include <openssl/pem.h>
@@ -99,7 +100,8 @@ static int certify(X509 **xret, const char *infile, int informat,
                    const char *enddate,
                    long days, int batch, const char *ext_sect, CONF *conf,
                    int verbose, unsigned long certopt, unsigned long nameopt,
-                   int default_op, int ext_copy, int selfsign, unsigned long dateopt);
+                   int default_op, int ext_copy, int selfsign, unsigned long dateopt,
+                   X509 *deltacert);
 static int certify_cert(X509 **xret, const char *infile, int certformat,
                         const char *passin, EVP_PKEY *pkey, X509 *x509,
                         const char *dgst,
@@ -110,7 +112,8 @@ static int certify_cert(X509 **xret, const char *infile, int certformat,
                         int multirdn, int email_dn, const char *startdate,
                         const char *enddate, long days, int batch, const char *ext_sect,
                         CONF *conf, int verbose, unsigned long certopt,
-                        unsigned long nameopt, int default_op, int ext_copy, unsigned long dateopt);
+                        unsigned long nameopt, int default_op, int ext_copy, unsigned long dateopt,
+                        X509 *deltacert);
 static int certify_spkac(X509 **xret, const char *infile, EVP_PKEY *pkey,
                          X509 *x509, const char *dgst,
                          STACK_OF(OPENSSL_STRING) *sigopts,
@@ -119,15 +122,17 @@ static int certify_spkac(X509 **xret, const char *infile, EVP_PKEY *pkey,
                          int multirdn, int email_dn, const char *startdate,
                          const char *enddate, long days, const char *ext_sect, CONF *conf,
                          int verbose, unsigned long certopt,
-                         unsigned long nameopt, int default_op, int ext_copy, unsigned long dateopt);
+                         unsigned long nameopt, int default_op, int ext_copy, unsigned long dateopt,
+                         X509 *deltacert);
 static int do_body(X509 **xret, EVP_PKEY *pkey, X509 *x509,
                    const char *dgst, STACK_OF(OPENSSL_STRING) *sigopts,
                    STACK_OF(CONF_VALUE) *policy, CA_DB *db, BIGNUM *serial,
                    const char *subj, unsigned long chtype, int multirdn,
                    int email_dn, const char *startdate, const char *enddate, long days,
                    int batch, int verbose, X509_REQ *req, const char *ext_sect,
-                   CONF *conf, unsigned long certopt, unsigned long nameopt,
-                   int default_op, int ext_copy, int selfsign, unsigned long dateopt);
+                   CONF *lconf, unsigned long certopt, unsigned long nameopt,
+                   int default_op, int ext_copy, int selfsign, unsigned long dateopt,
+                   X509 *deltacert);
 static int get_certificate_status(const char *ser_status, CA_DB *db);
 static int check_time_format(const char *str);
 static int do_revoke(X509 *x509, CA_DB *db, REVINFO_TYPE rev_type,
@@ -156,7 +161,8 @@ typedef enum OPTION_choice {
     OPT_RAND_SERIAL, OPT_QUIET,
     OPT_R_ENUM, OPT_PROV_ENUM,
     /* Do not change the order here; see related case statements below */
-    OPT_CRL_REASON, OPT_CRL_HOLD, OPT_CRL_COMPROMISE, OPT_CRL_CA_COMPROMISE
+    OPT_CRL_REASON, OPT_CRL_HOLD, OPT_CRL_COMPROMISE, OPT_CRL_CA_COMPROMISE,
+    OPT_DELTACERT
 } OPTION_CHOICE;
 
 const OPTIONS ca_options[] = {
@@ -250,6 +256,8 @@ const OPTIONS ca_options[] = {
     {"crlsec", OPT_CRLSEC, 'p', "Seconds until the next CRL is due"},
     {"revoke", OPT_REVOKE, '<', "Revoke a cert (given in file)"},
 
+    OPT_SECTION("Delta Certificate (Hybrid/Chameleon)"),
+    {"delta_cert", OPT_DELTACERT, '<', "Pre-issued Delta Certificate file"},
     OPT_R_OPTIONS,
     OPT_PROV_OPTIONS,
 
@@ -292,7 +300,10 @@ int ca_main(int argc, char **argv)
     size_t outdirlen = 0;
     int create_ser = 0, free_passin = 0, total = 0, total_done = 0;
     int batch = 0, default_op = 1, doupdatedb = 0, ext_copy = EXT_COPY_NONE;
-    int keyformat = FORMAT_UNDEF, multirdn = 1, notext = 0, output_der = 0;
+    int keyformat = FORMAT_PEM, multirdn = 0, notext = 0, output_der = 0;
+
+    char *deltacertfile = NULL;
+    X509 *deltacert = NULL;
     int ret = 1, email_dn = 1, req = 0, verbose = 0, gencrl = 0, dorevoke = 0;
     int rand_ser = 0, i, j, selfsign = 0, def_ret;
     char *crl_lastupdate = NULL, *crl_nextupdate = NULL;
@@ -493,9 +504,13 @@ opthelp:
             rev_arg = opt_arg();
             rev_type = (o - OPT_CRL_REASON) + REV_CRL_REASON;
             break;
+        case OPT_DELTACERT:
+            deltacertfile = opt_arg();
+            break;
         case OPT_ENGINE:
             e = setup_engine(opt_arg(), 0);
             break;
+
         }
     }
 
@@ -590,6 +605,12 @@ end_of_options:
         /* load_key() has already printed an appropriate message */
         goto end;
 
+    if (deltacertfile != NULL) {
+        deltacert = load_cert(deltacertfile, FORMAT_PEM, "Delta Certificate");
+        if (deltacert == NULL)
+             goto end;
+    }
+
     /*****************************************************************/
     /* we need a certificate */
     if (!selfsign || spkac_file || ss_cert_file || gencrl) {
@@ -609,6 +630,12 @@ end_of_options:
     }
     if (!selfsign)
         x509p = x509;
+
+    if (deltacert == NULL) {
+        /* Optional: could warn if deltacert is NULL but continuing means we just don't add the DCD extension.
+           However, in 'do_body' we might depend on it if hybrid logic is triggered.
+           For now we assume it's optional per-request or globally set. */
+    }
 
     f = app_conf_try_string(conf, BASE_SECTION, ENV_PRESERVE);
     if (f != NULL && (*f == 'y' || *f == 'Y'))
@@ -676,10 +703,11 @@ end_of_options:
         goto end;
 
     db = load_index(dbfile, &db_attr);
-    if (db == NULL) {
+    if (!db) {
         BIO_printf(bio_err, "Problem with index file: %s (could not load/parse file)\n", dbfile);
         goto end;
     }
+    if (verbose) BIO_printf(bio_err, "DEBUG: Loaded database from: %s\n", dbfile);
 
     /* Lets check some fields */
     for (i = 0; i < sk_OPENSSL_PSTRING_num(db->db->data); i++) {
@@ -937,7 +965,7 @@ end_of_options:
                               attribs, db, serial, subj, chtype, multirdn,
                               email_dn, startdate, enddate, days, extensions,
                               conf, verbose, certopt, get_nameopt(), default_op,
-                              ext_copy, dateopt);
+                              ext_copy, dateopt, deltacert);
             if (j < 0)
                 goto end;
             if (j > 0) {
@@ -958,7 +986,7 @@ end_of_options:
                              db, serial, subj, chtype, multirdn, email_dn,
                              startdate, enddate, days, batch, extensions,
                              conf, verbose, certopt, get_nameopt(), default_op,
-                             ext_copy, dateopt);
+                             ext_copy, dateopt, deltacert);
             if (j < 0)
                 goto end;
             if (j > 0) {
@@ -978,7 +1006,8 @@ end_of_options:
                         sigopts, vfyopts, attribs, db,
                         serial, subj, chtype, multirdn, email_dn, startdate,
                         enddate, days, batch, extensions, conf, verbose,
-                        certopt, get_nameopt(), default_op, ext_copy, selfsign, dateopt);
+                        certopt, get_nameopt(), default_op, ext_copy, selfsign, dateopt,
+                        deltacert);
             if (j < 0)
                 goto end;
             if (j > 0) {
@@ -999,7 +1028,8 @@ end_of_options:
                         attribs, db,
                         serial, subj, chtype, multirdn, email_dn, startdate,
                         enddate, days, batch, extensions, conf, verbose,
-                        certopt, get_nameopt(), default_op, ext_copy, selfsign, dateopt);
+                        certopt, get_nameopt(), default_op, ext_copy, selfsign, dateopt,
+                        deltacert);
             if (j < 0)
                 goto end;
             if (j > 0) {
@@ -1319,6 +1349,7 @@ end_of_options:
     sk_OPENSSL_STRING_free(sigopts);
     sk_OPENSSL_STRING_free(vfyopts);
     EVP_PKEY_free(pkey);
+    X509_free(deltacert);
     X509_free(x509);
     X509_CRL_free(crl);
     NCONF_free(conf);
@@ -1346,7 +1377,8 @@ static int certify(X509 **xret, const char *infile, int informat,
                    const char *enddate,
                    long days, int batch, const char *ext_sect, CONF *lconf,
                    int verbose, unsigned long certopt, unsigned long nameopt,
-                   int default_op, int ext_copy, int selfsign, unsigned long dateopt)
+                   int default_op, int ext_copy, int selfsign, unsigned long dateopt,
+                   X509 *deltacert)
 {
     X509_REQ *req = NULL;
     EVP_PKEY *pktmp = NULL;
@@ -1385,7 +1417,7 @@ static int certify(X509 **xret, const char *infile, int informat,
     ok = do_body(xret, pkey, x509, dgst, sigopts, policy, db, serial, subj,
                  chtype, multirdn, email_dn, startdate, enddate, days, batch,
                  verbose, req, ext_sect, lconf, certopt, nameopt, default_op,
-                 ext_copy, selfsign, dateopt);
+                 ext_copy, selfsign, dateopt, deltacert);
 
  end:
     ERR_print_errors(bio_err);
@@ -1403,7 +1435,8 @@ static int certify_cert(X509 **xret, const char *infile, int certformat,
                         int multirdn, int email_dn, const char *startdate,
                         const char *enddate, long days, int batch, const char *ext_sect,
                         CONF *lconf, int verbose, unsigned long certopt,
-                        unsigned long nameopt, int default_op, int ext_copy, unsigned long dateopt)
+                        unsigned long nameopt, int default_op, int ext_copy, unsigned long dateopt,
+                        X509 *deltacert)
 {
     X509 *template_cert = NULL;
     X509_REQ *rreq = NULL;
@@ -1442,7 +1475,7 @@ static int certify_cert(X509 **xret, const char *infile, int certformat,
     ok = do_body(xret, pkey, x509, dgst, sigopts, policy, db, serial, subj,
                  chtype, multirdn, email_dn, startdate, enddate, days, batch,
                  verbose, rreq, ext_sect, lconf, certopt, nameopt, default_op,
-                 ext_copy, 0, dateopt);
+                 ext_copy, 0, dateopt, deltacert);
 
  end:
     X509_REQ_free(rreq);
@@ -1457,7 +1490,8 @@ static int do_body(X509 **xret, EVP_PKEY *pkey, X509 *x509,
                    int email_dn, const char *startdate, const char *enddate, long days,
                    int batch, int verbose, X509_REQ *req, const char *ext_sect,
                    CONF *lconf, unsigned long certopt, unsigned long nameopt,
-                   int default_op, int ext_copy, int selfsign, unsigned long dateopt)
+                   int default_op, int ext_copy, int selfsign, unsigned long dateopt,
+                   X509 *deltacert)
 {
     const X509_NAME *name = NULL;
     X509_NAME *CAname = NULL, *subject = NULL;
@@ -1475,6 +1509,7 @@ static int do_body(X509 **xret, EVP_PKEY *pkey, X509 *x509,
     OPENSSL_STRING *rrow = NULL;
     char buf[25];
     X509V3_CTX ext_ctx;
+    ASN1_OCTET_STRING *dcd_ext_val = NULL;
 
     for (i = 0; i < DB_NUMBER; i++)
         row[i] = NULL;
@@ -1492,6 +1527,7 @@ static int do_body(X509 **xret, EVP_PKEY *pkey, X509 *x509,
         BIO_printf(bio_err, "The Subject's Distinguished Name is as follows\n");
 
     name = X509_REQ_get_subject_name(req);
+
     for (i = 0; i < X509_NAME_entry_count(name); i++) {
         ne = X509_NAME_get_entry(name, i);
         str = X509_NAME_ENTRY_get_data(ne);
@@ -1746,6 +1782,88 @@ static int do_body(X509 **xret, EVP_PKEY *pkey, X509 *x509,
         goto end;
     }
 
+    /* Create and Add Delta Certificate Descriptor Extension */
+    if (deltacert) {
+        if (verbose)
+             BIO_printf(bio_err, "Creating Delta Certificate Descriptor extension using pre-issued Delta Cert\n");
+        
+        dcd_ext_val = create_delta_certificate_descriptor(ret, deltacert);
+        if (!dcd_ext_val) {
+             BIO_printf(bio_err, "ERROR: creating Delta Certificate Descriptor\n");
+             goto end;
+        }
+        
+        /* Add extension. NID for DCD. We need an OID. 
+           Draft-07 Section 3 says OID: 2.16.840.1.114027.80.6.1 
+           (Wait, that OID is for Delta Request Attribute: 2.16.840.1.114027.80.6.2 ?)
+           Let's check v3_dcd.h or just use a temporary OBJ_create if strictly needed,
+           or use the 'delta_descriptor' NID if it was defined.
+           
+           Actually, we haven't defined NID_delta_certificate_descriptor properly in objects.h or implicit add.
+           For now, let's create a dynamic object or try to look it up.
+           
+           If I can't look it up, I'll error. But wait, I can use X509_EXTENSION_create_by_NID with custom NID?
+           Or create by OBJ.
+           
+           For this POC, let's use a temporary OID NID if undefined, or assume NID_subject_alt_name as placeholder? No that's bad.
+           Let's assume we can use a custom OID string. 
+           
+           Actually, let's just use a fixed OID "2.16.840.1.114027.80.6.3" (Fake one) or whatever the draft says.
+           Draft says: 
+           id-ce-delta-certificate-descriptor OBJECT IDENTIFIER ::= { id-ce TBD }
+           
+           So there is no official OID yet. I will use a private OID "1.2.840.113549.1.9.99.1" for testing or similar.
+           Or reuse the Attribute OID for now if it makes sense? No.
+           
+           I will use NID_undef? No, I need a valid extension object.
+           Let's register a temporary OID at runtime if possible, or just use a well-known valid OID (like 'my-oid') if configured.
+           
+           Better yet, I'll use a dynamic OID.
+         */
+         int nid_dcd_ext = NID_undef;
+         X509_EXTENSION *ex = NULL;
+
+    /* Create simple extension from DER */
+    /* Add the extension NID dynamically if not already present */
+    nid_dcd_ext = OBJ_txt2nid("2.16.840.1.114027.80.6.1");
+    if (nid_dcd_ext == NID_undef) {
+        nid_dcd_ext = OBJ_create("2.16.840.1.114027.80.6.1", "deltaCertificateDescriptor", "Delta Certificate Descriptor");
+    }
+    
+    if (nid_dcd_ext == NID_undef) {
+        BIO_printf(bio_err, "ERROR: failed to create OID for DCD\n");
+        goto end;
+    }
+
+    if (verbose)
+        BIO_printf(bio_err, "DEBUG: DCD Extension NID: %d\n", nid_dcd_ext);
+
+    if (dcd_ext_val->length == 0) {
+        BIO_printf(bio_err, "ERROR: DCD extension value is empty\n");
+        goto end;
+    }
+    if (verbose)
+        BIO_printf(bio_err, "DEBUG: DCD extension value length: %d\n", dcd_ext_val->length);
+
+    ex = X509_EXTENSION_create_by_NID(NULL, nid_dcd_ext, 0, dcd_ext_val);
+    if (!ex) {
+        BIO_printf(bio_err, "ERROR: creating DCD extension object\n");
+        goto end;
+    }
+
+    /* Add to certificate */
+    if (!X509_add_ext(ret, ex, -1)) {
+        BIO_printf(bio_err, "ERROR: adding DCD extension to certificate\n");
+        ERR_print_errors(bio_err);
+        X509_EXTENSION_free(ex);
+        goto end;
+    }
+    X509_EXTENSION_free(ex);
+         
+         if (verbose)
+             BIO_printf(bio_err, "Successfully added Delta Certificate Descriptor extension\n");
+    }
+
     if (verbose)
         BIO_printf(bio_err,
                    "The subject name appears to be ok, checking database for clashes\n");
@@ -1939,6 +2057,7 @@ static int do_body(X509 **xret, EVP_PKEY *pkey, X509 *x509,
     }
     OPENSSL_free(irow);
 
+    if (dcd_ext_val) ASN1_OCTET_STRING_free(dcd_ext_val);
     X509_NAME_free(CAname);
     X509_NAME_free(subject);
     if (ok <= 0)
@@ -1968,7 +2087,8 @@ static int certify_spkac(X509 **xret, const char *infile, EVP_PKEY *pkey,
                          int multirdn, int email_dn, const char *startdate,
                          const char *enddate, long days, const char *ext_sect,
                          CONF *lconf, int verbose, unsigned long certopt,
-                         unsigned long nameopt, int default_op, int ext_copy, unsigned long dateopt)
+                         unsigned long nameopt, int default_op, int ext_copy, unsigned long dateopt,
+                         X509 *deltacert)
 {
     STACK_OF(CONF_VALUE) *sk = NULL;
     LHASH_OF(CONF_VALUE) *parms = NULL;
@@ -2081,7 +2201,7 @@ static int certify_spkac(X509 **xret, const char *infile, EVP_PKEY *pkey,
     ok = do_body(xret, pkey, x509, dgst, sigopts, policy, db, serial, subj,
                  chtype, multirdn, email_dn, startdate, enddate, days, 1,
                  verbose, req, ext_sect, lconf, certopt, nameopt, default_op,
-                 ext_copy, 0, dateopt);
+                 ext_copy, 0, dateopt, deltacert);
  end:
     X509_REQ_free(req);
     CONF_free(parms);

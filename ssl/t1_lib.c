@@ -3755,12 +3755,19 @@ EVP_PKEY *tmppkey;
 SSL_CTX *sctx = SSL_CONNECTION_GET_CTX(s);
 
 /* Look for a shared sigalgs matching possible certificates */
-for (i = 0; i < s->shared_sigalgslen; i++) {
-    if (!strcmp(s->shared_sigalgs[i]->name, "mldsa44")) {
-        lu = s->shared_sigalgs[i];
-        return lu;        
+    for (i = 0; i < s->shared_sigalgslen; i++) {
+        /*
+         * Check for NULL pointer to avoid crash
+         */
+        if (s->shared_sigalgs[i] == NULL || s->shared_sigalgs[i]->name == NULL) {
+             continue;
+        }
+
+        if (!strcmp(s->shared_sigalgs[i]->name, "mldsa44")) {
+            lu = s->shared_sigalgs[i];
+            return lu;        
+        }
     }
-}
 
 return lu;
 }

@@ -20,6 +20,7 @@ extern const X509V3_EXT_METHOD ossl_v3_crl_hold, ossl_v3_pci;
 extern const X509V3_EXT_METHOD ossl_v3_policy_mappings, ossl_v3_policy_constraints;
 extern const X509V3_EXT_METHOD ossl_v3_name_constraints, ossl_v3_inhibit_anyp, ossl_v3_idp;
 extern const X509V3_EXT_METHOD ossl_v3_addr, ossl_v3_asid;
+extern const X509V3_EXT_METHOD ossl_v3_alt_sig_alg, ossl_v3_alt_sig_val;
 extern const X509V3_EXT_METHOD ossl_v3_ct_scts[3];
 extern const X509V3_EXT_METHOD ossl_v3_tls_feature;
 extern const X509V3_EXT_METHOD ossl_v3_ext_admission;

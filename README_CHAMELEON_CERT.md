@@ -18,19 +18,6 @@ This allows systems to reconstruct the delta certificate from the base without t
 - Full backward compatibility (non-critical v3 extension)
 
 
-## Features
-
-1. **Delta Certificate Descriptor (DCD) Extension** (`id-ce-deltaCertificateDescriptor`)
-    - Embedded in the base certificate as a non-critical extension
-    - Contains only the differences required to reconstruct the paired delta certificate (serial, signature algorithm, extensions, etc.)
-    - Compatible with existing PKI validation (RFC 5280)
-
-2. **OpenSSL Integration**
-    - Added encoder/decoder for DCD in crypto/x509/v3_dcd.c.
-    - New CLI options in apps/verify.c:
-        -  -dcd_verify
-
-
 ## Building and Testing
 
 ### Prerequisites
@@ -44,7 +31,7 @@ This allows systems to reconstruct the delta certificate from the base without t
 ```bash
 git clone -b develop https://github.com/jelliyjane/opensslForPQCert.git
 cd opensslForPQCert
-./config --prefix=/usr/local/ssl --openssldir=/usr/local/ssl
+./config --prefix=/usr/local/ssl --openssldir=/usr/local/ssl --libdir=lib
 make -j$(nproc)
 sudo make install
 ```
@@ -58,29 +45,180 @@ This section describes how to test the Chameleon certificate implementation usin
 - Working directory for test certificates
 
 #### Test Setup
+
 ```bash
 # Create a working directory
-mkdir -p test_chameleon_certs
-cd test_chameleon_certs
+mkdir Classic_Root Classic_ICA PQ_Root PQ_ICA Server
+
+mkdir \
+Classic_Root/cert Classic_Root/key PQ_Root/cert PQ_Root/key \
+Classic_ICA/cert Classic_ICA/key Classic_ICA/csr \
+PQ_ICA/cert PQ_ICA/key PQ_ICA/csr \
+Server/cert Server/key Server/csr
 ```
 
-#### Step 1: Generate Base Key (ECDSA)
+#### Step 1: Generate Key
+
 ```bash
-# Base private key (ECDSA)
-openssl ecparam -name prime256v1 -genkey -noout -out base_key.pem
+# Classical private key (ECDSA)
+openssl ecparam -genkey -name secp256r1 -out Classic_Root/key/ca.p256_key.pem
+openssl ecparam -genkey -name secp256r1 -out Classic_ICA/key/ica.p256_key.pem
+openssl ecparam -genkey -name secp256r1 -out Server/key/server.p256_key.pem
+
+# PQ private key (ML-DSA)
+openssl genpkey -algorithm mldsa44 -out PQ_Root/key/ca.mldsa44_key.pem
+openssl genpkey -algorithm mldsa44 -out PQ_ICA/key/ica.mldsa44_key.pem
+openssl genpkey -algorithm mldsa44 -out Server/key/server.mldsa44_key.pem
 ```
 
-#### Step 2: Create Delta Certicate (ML-DSA)PQC
+#### Step 2: Root CA Certificate (self-sign)
+
 ```bash
-openssl req -new -x509 -newkey mldsa44 -keyout delta_key.pem -out delta_cert.pem -nodes -subj "/CN=Delta Certificate" -days 365
+# Classical Certificate Issue (ECDSA)
+openssl req -new -x509 \
+-key Classic_Root/key/ca.p256_key.pem \
+-out Classic_Root/cert/ca.p256_cert.pem \
+-subj "/CN=Classic Root CA" -days 3650 \
+-addext "basicConstraints=critical,CA:TRUE,pathlen:1" \
+-addext "keyUsage=critical,keyCertSign,cRLSign" \
+-addext "subjectKeyIdentifier=hash" \
+-addext "authorityKeyIdentifier=keyid:always,issuer"
+
+# PQ Certificate Issue (ML-DSA)
+openssl req -new -x509 \
+-key PQ_Root/key/ca.mldsa44_key.pem \
+-out PQ_Root/cert/ca.mldsa44_cert.pem \
+-subj "/CN=PQ Root CA" -days 3650 \
+-addext "basicConstraints=critical,CA:TRUE,pathlen:1" \
+-addext "keyUsage=critical,keyCertSign,cRLSign" \
+-addext "subjectKeyIdentifier=hash" \
+-addext "authorityKeyIdentifier=keyid:always,issuer"
 ```
 
-#### Step 3: Create Paired Certificate (ECDAS + ML-DSA)
+#### Step 3: Intermediate CA Certificate
+
+**3.1 Intermedicate CA Certificate Request**
 ```bash
-openssl req -new -x509 -key base_key.pem -out paired_cert.pem -nodes -subj "/CN=Paired Certificate" -days 365 -addext "deltaCertificateDescriptor=file:./delta_cert.pem"
+# ICA CSR Issue
+openssl req -new \
+-key Classic_ICA/key/ica.p256_key.pem \
+-out Classic_ICA/csr/ica.p256_csr.pem \
+-subj "/CN=Classic Intermediate CA"
+
+openssl req -new \
+-key PQ_ICA/key/ica.mldsa44_key.pem \
+-out PQ_ICA/csr/ica.mldsa44_csr.pem \
+-subj "/CN=PQ Intermediate CA"
 ```
 
-#### Step 4: Verification
+**3.2 Intermediate CA Certificate Extension**
+``` bash
+# ica_ext_lv1.cnf
+basicConstraints = critical, CA:TRUE, pathlen:0
+keyUsage = critical, keyCertSign, cRLSign
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid,issuer
+```
+
+**3.3 intermediate CA Certificate Issue**
 ```bash
-openssl verify -CAfile paired_cert.pem -dcd_verify paired_cert.pem
+# ICA Classical Certificate Issue (ECDSA)
+openssl x509 -req -days 1850 \
+-in Classic_ICA/csr/ica.p256_csr.pem \
+-CA Classic_Root/cert/ca.p256_cert.pem \
+-CAkey Classic_Root/key/ca.p256_key.pem \
+-CAcreateserial \
+-out Classic_ICA/cert/ica.p256_cert.pem \
+-extfile Classic_ICA/ica_ext_lv1.cnf
+
+# ICA PQ Certificate Issue (ML-DSA)
+openssl x509 -req -days 1850 \
+-in PQ_ICA/csr/ica.mldsa44_csr.pem \
+-CA PQ_Root/cert/ca.mldsa44_cert.pem \
+-CAkey PQ_Root/key/ca.mldsa44_key.pem \
+-CAcreateserial \
+-out PQ_ICA/cert/ica.mldsa44_cert.pem \
+-extfile PQ_ICA/ica_ext_lv1.cnf
+```
+
+#### Step 4: Server Certificate (Chameleon, ML-DSA + ECDSA)
+
+**4.1 Delta Certificate Issue**
+```bash
+# Delta Certificate CSR Issue (ML-DSA)
+openssl req -new \
+-key Server/key/server.mldsa44_key.pem \
+-out Server/csr/server.delta.mldsa44_csr.pem \
+-subj "/CN=Server PQ Cert"
+
+# Delta Certificate Issue
+openssl x509 -req \
+-in Server/csr/server.delta.mldsa44_csr.pem \
+-CA PQ_ICA/cert/ica.mldsa44_cert.pem \
+-CAkey PQ_ICA/key/ica.mldsa44_key.pem \
+-CAcreateserial \
+-out Server/cert/server.delta.mldsa44_cert.pem
+```
+
+**4.2 Chameleon Certificate Issue**
+```bash
+# Chameleon Certificate CSR Issue (ECDSA)
+openssl req -new \
+-key Server/key/server.p256_key.pem \
+-out Server/csr/server.chameleon.mldsa44_p256_csr.pem \
+-subj "/CN=Server Chameleon Cert"
+
+# Chameleon Certificate Issue (ECDSA + ML-DSA)
+openssl x509 -req \
+-in Server/csr/server.chameleon.mldsa44_p256_csr.pem \
+-CA Classic_ICA/cert/ica.p256_cert.pem \
+-CAkey Classic_ICA/key/ica.p256_key.pem \
+-CAcreateserial \
+-out Server/cert/server.chameleon.mldsa44_p256_cert.pem \
+-delta_cert Server/certserver.delta.mldsa44_cert.pem
+```
+
+#### Step 5: Verification
+
+**5.1 Generate Bundle**
+```bash
+cat Classic_Root/cert/ca.p256_cert.pem PQ_Root/cert/ca.mldsa44_cert.pem > Server/cert/rootca_lv1.pem
+cat Classic_ICA/cert/ica.p256_cert.pem PQ_ICA/cert/ica.mldsa44_cert.pem > Server/cert/ica_lv1.pem
+```
+
+**5.2 Verify Certificate**
+```bash
+openssl verify \
+-CAfile Server/cert/rootca_lv1.pem \
+-untrusted Server/cert/ica_lv1.pem \
+-dcd_verify \
+Server/cert/server.chameleon.mldsa44_p256_cert.pem
+```
+
+#### Step 6: TLS Handshaking Testing
+
+**6.1 Generate Certificate Chain**
+```bash
+cat Server/cert/server.chameleon.mldsa44_p256_cert.pem \
+Classic_ICA/cert/ica.p256_cert.pem \
+PQ_ICA/cert/ica.mldsa44_cert.pem \
+> Server/cert/chameleon_server_chain_lv1.pem
+```
+
+**Server**
+```bash
+openssl s_server -accept 14434 \
+-cert Server/cert/chameleon_server_chain_lv1.pem \
+-key Server/key/server.p256_key.pem \
+-hybkey Server/key/server.mldsa44_key.pem \
+-hybcert chameleon \
+-tls1_3 -msg -state
+```
+
+**Client**
+```bash
+openssl s_client -connect 127.0.0.1:14434 \
+-CAfile Server/cert/rootca_lv1.pem \
+-hybcert chameleon \
+-tls1_3 -msg -state
 ```
