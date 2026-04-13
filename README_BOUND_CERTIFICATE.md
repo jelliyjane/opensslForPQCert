@@ -59,7 +59,7 @@ The implementation provides a complete solution for creating and verifying bound
 
 
 ```bash
-git clone -b bound-openssl-3.3 https://github.com/wibs2401/opensslForPQCert.git
+git clone -b Dual_openssl-3.3 https://github.com/jelliyjane/opensslForPQCert.git
 cd opensslForPQCert
 ./config --prefix=/usr/local/ssl --openssldir=/usr/local/ssl
 make -j$(nproc)
