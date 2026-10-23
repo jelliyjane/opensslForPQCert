@@ -19,8 +19,14 @@ and certificate-size overheads over realistic wide-area network conditions.
 The fork adds, in round numbers, **~8,000 lines of C** to OpenSSL's TLS 1.3
 handshake layer and X.509 certificate handling (plus a separate ~3,200-line
 measurement/test harness). The central handshake addition is a new
-`PQCertificateVerify` message that carries the proof-of-possession for the
-post-quantum key, chained onto the classical `CertificateVerify` transcript.
+`PQCertificateVerify` message (HandshakeType 250) that carries the
+proof-of-possession for the post-quantum key of a negotiated `hybrid_cert` type,
+chained onto the classical `CertificateVerify` transcript. It has the same body
+as `CertificateVerify` (`SignatureScheme` + `opaque signature<0..2^16-1>`) and is
+signed over the RFC 8446 construction with its own context string,
+`"TLS 1.3, server PQ CertificateVerify"` (`"... client PQ CertificateVerify"`
+for client authentication), and the transcript hash taken *after* the classical
+`CertificateVerify`.
 
 > **Scope note (measured configuration).** In the benchmarked configuration,
 > *authentication* (signatures / certificates) is post-quantum, while the TLS
@@ -33,10 +39,13 @@ post-quantum key, chained onto the classical `CertificateVerify` transcript.
 ## Supported hybrid certificate formats
 
 Four hybrid formats are negotiated through the fork's `hybrid_cert` TLS
-extension. A fifth format, **Composite**, is handled entirely through
-oqs-provider composite signature OIDs on the standard `signature_algorithms`
-path and does **not** go through `hybrid_cert` (it is included in the
-measurements as a control, not as a negotiated hybrid type).
+extension; only these four send the `PQCertificateVerify`. A fifth format,
+**Composite**, is handled entirely through oqs-provider composite signature OIDs
+on the standard `signature_algorithms` path and does **not** go through
+`hybrid_cert`: its combined classical+PQC signature travels in the standard
+`CertificateVerify`, exactly like a pure-PQC (ML-DSA, Falcon, SLH-DSA) leaf, so
+it needs neither `hybrid_cert` negotiation nor a `PQCertificateVerify`. It is
+included in the measurements as a control, not as a negotiated hybrid type.
 
 | Type code | Format | Family | Mechanism (spec) |
 |:--:|---|---|---|
@@ -44,7 +53,7 @@ measurements as a control, not as a negotiated hybrid type).
 | 2 | **Catalyst** | single certificate | `subjectAltPublicKeyInfo` + `altSignatureAlgorithm` + `altSignatureValue` X.509 extensions on one object |
 | 3 | **Related** | multi certificate | RFC 9763 `RelatedCertificate` extension binding a PQC leaf to a classical leaf by hash |
 | 4 | **Dual** | multi certificate | two independent certificate chains (classical + PQC), draft-yusef-tls-pqt-dual-certs |
-| — | *Composite* | single certificate | oqs-provider composite OID (e.g. `p256_mldsa65`); negotiated via `signature_algorithms`, not `hybrid_cert` |
+| — | *Composite* | single certificate | oqs-provider composite OID (e.g. `p384_mldsa65`); negotiated via `signature_algorithms`, not `hybrid_cert`; proof-of-possession is the standard `CertificateVerify` (no `PQCertificateVerify`) |
 
 ### `hybrid_cert` type negotiation
 
@@ -212,8 +221,14 @@ cert_bytes,verify_ok
 Runs made with the current tree additionally append a trailing
 `cert_verify_ms` column (client certificate-chain verification, added after the
 paper campaign; `hybrid_measure --csv-header` prints the current 15-column
-header). The dataset is available from the authors on request, and any row of it
-can be regenerated with the AWS automation above.
+header). The measurement campaign was run with the wire protocol as of commit
+`2149603` (tag `paper-campaign`) or earlier; the changes after that tag alter
+only the HandshakeType of the PQC-only / Composite proof-of-possession (now the
+standard `CertificateVerify`, 15, instead of `PQCertificateVerify`, 250 — same
+body, same length) and the `PQCertificateVerify` context string, neither of
+which changes the transmitted byte count or the number and kind of signature
+operations the dataset measures. The dataset is available from the authors on
+request, and any row of it can be regenerated with the AWS automation above.
 
 ---
 

@@ -3426,7 +3426,6 @@ int validate_pq_certificate(DUAL_VALIDATION_CTX *ctx);
 int validate_pq_certificate_chain(DUAL_VALIDATION_CTX *ctx);
 
 int is_composite_certificate(SSL_CONNECTION *s);
-int is_pqc_only_certificate(SSL_CONNECTION *s);
 int tls1_select_composite_sigalg(SSL_CONNECTION *s, EVP_PKEY *composite_pkey, 
                                  const SIGALG_LOOKUP **sigalg);
 int tls1_select_pq_sigalg(SSL_CONNECTION *s, EVP_PKEY *pq_pkey, 

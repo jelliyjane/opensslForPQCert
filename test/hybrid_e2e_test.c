@@ -22,6 +22,11 @@
  *   - downgrade defense  : a strict client aborts when hybrid is stripped, while
  *                          a permissive client falls back to traditional auth
  *   - mutual TLS         : the server verifies a client-presented dual cert
+ *   - standard path      : a pure-PQC or composite leaf proves possession with
+ *                          the STANDARD CertificateVerify alone -- its scheme is
+ *                          negotiated via signature_algorithms, no
+ *                          PQCertificateVerify is sent and hybrid is not
+ *                          negotiated (that message is for hybrid_cert types)
  *
  * Both hybrid formats are now driven end-to-end:
  *   - Dual (multi-certificate): the server presents a separate PQC certificate.
@@ -67,6 +72,7 @@ static int have_oqs = 0;
 typedef struct {
     int pq_cert_verify;     /* PQCertificateVerify messages seen */
     int classical_cv;       /* (classical) CertificateVerify messages seen */
+    int peer_sig_nid;       /* scheme that verified the last peer *CertificateVerify */
 } handshake_obs;
 
 static void msg_cb(int write_p, int version, int content_type, const void *buf,
@@ -357,6 +363,8 @@ static int connect_observed(SSL_CTX *sctx, SSL_CTX *cctx, handshake_obs *obs,
     ret = run_handshake(serverssl, clientssl, creason);
     if (negotiated != NULL)
         *negotiated = client_hybrid_negotiated(clientssl);
+    if (!SSL_get_peer_signature_type_nid(clientssl, &obs->peer_sig_nid))
+        obs->peer_sig_nid = NID_undef;
 
  end:
     SSL_free(serverssl);
@@ -1125,6 +1133,221 @@ static int test_related_type_intersection(int idx)
     return ok;
 }
 
+/*
+ * Build a pair where the server presents a PURE PQC leaf (mldsa65, issued by
+ * the PQC CA) as its only certificate.  Neither side enables hybrid
+ * authentication: this is stock TLS 1.3 with the ML-DSA scheme negotiated
+ * through signature_algorithms (oqs-provider registers it through the
+ * TLS-SIGALG capability), and the client validates the chain with its
+ * ordinary verify store.
+ */
+static int build_pure_pair(SSL_CTX **sctx, SSL_CTX **cctx)
+{
+    char *scert = cert_path("server_mldsa65_cert.pem");
+    char *skey = cert_path("server_mldsa65_key.pem");
+    char *capq = cert_path("ca_mldsa65.pem");
+    int ok = 0;
+
+    *sctx = NULL;
+    *cctx = NULL;
+    if (!TEST_ptr(scert) || !TEST_ptr(skey) || !TEST_ptr(capq))
+        goto end;
+
+    if (!TEST_true(create_ssl_ctx_pair(NULL, TLS_server_method(),
+                                       TLS_client_method(),
+                                       TLS1_3_VERSION, TLS1_3_VERSION,
+                                       sctx, cctx, scert, skey)))
+        goto end;
+
+    if (!TEST_true(SSL_CTX_load_verify_file(*cctx, capq)))
+        goto end;
+    SSL_CTX_set_verify(*cctx, SSL_VERIFY_PEER, NULL);
+
+    ok = 1;
+ end:
+    OPENSSL_free(scert);
+    OPENSSL_free(skey);
+    OPENSSL_free(capq);
+    if (!ok) {
+        SSL_CTX_free(*sctx);
+        SSL_CTX_free(*cctx);
+        *sctx = NULL;
+        *cctx = NULL;
+    }
+    return ok;
+}
+
+/*
+ * Issue a server leaf for |leaf_key| under the PQC CA at runtime (used for the
+ * composite control, whose fixture is not committed).  The CA signs with its
+ * own ML-DSA key; the leaf's key type is whatever |leaf_key| is.
+ */
+static X509 *make_pq_issued_leaf(X509 *ca, EVP_PKEY *ca_key, EVP_PKEY *leaf_key)
+{
+    X509 *x = X509_new();
+    ASN1_TIME *nb = ASN1_TIME_set(NULL, 1700000000);
+    ASN1_TIME *na = ASN1_TIME_set(NULL, 1900000000);
+    X509_NAME *subj = X509_NAME_new();
+    int ok = 0;
+
+    if (x == NULL || nb == NULL || na == NULL || subj == NULL
+            || !X509_NAME_add_entry_by_txt(subj, "CN", MBSTRING_ASC,
+                   (const unsigned char *)"server.example.com", -1, -1, 0))
+        goto end;
+
+    if (!X509_set_version(x, X509_VERSION_3)
+            || !ASN1_INTEGER_set(X509_get_serialNumber(x), 3001)
+            || !X509_set1_notBefore(x, nb) || !X509_set1_notAfter(x, na)
+            || !X509_set_subject_name(x, subj)
+            || !X509_set_issuer_name(x, X509_get_subject_name(ca))
+            || !X509_set_pubkey(x, leaf_key)
+            || !add_basic_constraints(x)
+            || X509_sign(x, ca_key, NULL) == 0)
+        goto end;
+    ok = 1;
+ end:
+    ASN1_TIME_free(nb);
+    ASN1_TIME_free(na);
+    X509_NAME_free(subj);
+    if (!ok) {
+        X509_free(x);
+        x = NULL;
+    }
+    return x;
+}
+
+/*
+ * Build a pair where the server presents a COMPOSITE leaf: a single
+ * certificate whose key is the oqs-provider composite sigalg p384_mldsa65
+ * (ECDSA P-384 + ML-DSA-65 as one key and one combined signature), generated
+ * at runtime and issued by the PQC CA.  As in the pure case nothing hybrid is
+ * enabled on either side: the composite scheme is negotiated through
+ * signature_algorithms like any other scheme.
+ */
+static int build_composite_pair(SSL_CTX **sctx, SSL_CTX **cctx)
+{
+    X509 *ca_pq = load_cert("ca_mldsa65.pem");
+    EVP_PKEY *ca_pq_key = load_key("ca_mldsa65_key.pem");
+    char *capq = cert_path("ca_mldsa65.pem");
+    EVP_PKEY_CTX *kctx = NULL;
+    EVP_PKEY *ckey = NULL;
+    X509 *leaf = NULL;
+    int ok = 0;
+
+    *sctx = NULL;
+    *cctx = NULL;
+    if (!TEST_ptr(ca_pq) || !TEST_ptr(ca_pq_key) || !TEST_ptr(capq))
+        goto end;
+    /* Generic keygen: EVP_PKEY_Q_keygen() only knows the built-in type names. */
+    if (!TEST_ptr(kctx = EVP_PKEY_CTX_new_from_name(NULL, "p384_mldsa65", NULL))
+            || !TEST_int_gt(EVP_PKEY_keygen_init(kctx), 0)
+            || !TEST_int_gt(EVP_PKEY_keygen(kctx, &ckey), 0))
+        goto end;
+    if (!TEST_ptr(leaf = make_pq_issued_leaf(ca_pq, ca_pq_key, ckey)))
+        goto end;
+
+    /* No certificate files: the composite leaf is the server's ONLY cert. */
+    if (!TEST_true(create_ssl_ctx_pair(NULL, TLS_server_method(),
+                                       TLS_client_method(),
+                                       TLS1_3_VERSION, TLS1_3_VERSION,
+                                       sctx, cctx, NULL, NULL)))
+        goto end;
+    if (!TEST_true(SSL_CTX_use_certificate(*sctx, leaf))
+            || !TEST_true(SSL_CTX_use_PrivateKey(*sctx, ckey)))
+        goto end;
+
+    if (!TEST_true(SSL_CTX_load_verify_file(*cctx, capq)))
+        goto end;
+    SSL_CTX_set_verify(*cctx, SSL_VERIFY_PEER, NULL);
+
+    ok = 1;
+ end:
+    X509_free(ca_pq);
+    EVP_PKEY_free(ca_pq_key);
+    OPENSSL_free(capq);
+    EVP_PKEY_CTX_free(kctx);
+    EVP_PKEY_free(ckey);
+    X509_free(leaf);
+    if (!ok) {
+        SSL_CTX_free(*sctx);
+        SSL_CTX_free(*cctx);
+        *sctx = NULL;
+        *cctx = NULL;
+    }
+    return ok;
+}
+
+/*
+ * Shared assertion for the two single-certificate controls: the handshake
+ * completes, hybrid is NOT negotiated, exactly one standard CertificateVerify
+ * and NO PQCertificateVerify are on the wire, and the client verified that
+ * CertificateVerify under |scheme| (the PQC / composite signature algorithm
+ * negotiated via signature_algorithms), i.e. the proof-of-possession really
+ * was the PQC/composite signature inside the standard message.
+ */
+static int expect_standard_cv(SSL_CTX *sctx, SSL_CTX *cctx, const char *scheme)
+{
+    handshake_obs obs;
+    int negotiated = 1, expect_nid = OBJ_txt2nid(scheme);
+
+    if (!TEST_int_ne(expect_nid, NID_undef))
+        return 0;
+    if (!TEST_true(connect_observed(sctx, cctx, &obs, &negotiated, NULL, 0, 0)))
+        return 0;
+    return TEST_int_eq(negotiated, 0)
+        && TEST_int_eq(obs.classical_cv, 1)
+        && TEST_int_eq(obs.pq_cert_verify, 0)
+        && TEST_int_eq(obs.peer_sig_nid, expect_nid);
+}
+
+/*
+ * Test 12: pure-PQC leaf on the standard path.  The server's only certificate
+ * is an ML-DSA-65 leaf; its proof-of-possession is the STANDARD
+ * CertificateVerify carrying the ML-DSA signature.  No PQCertificateVerify is
+ * sent and hybrid is not negotiated.
+ */
+static int test_pure_pqc_standard_cv(void)
+{
+    SSL_CTX *sctx = NULL, *cctx = NULL;
+    int ok = 0;
+
+    if (!have_oqs)
+        return TEST_skip("oqsprovider not available");
+    if (!build_pure_pair(&sctx, &cctx))
+        goto end;
+    if (!expect_standard_cv(sctx, cctx, "mldsa65"))
+        goto end;
+    ok = 1;
+ end:
+    SSL_CTX_free(sctx);
+    SSL_CTX_free(cctx);
+    return ok;
+}
+
+/*
+ * Test 13: composite leaf on the standard path.  The server's only certificate
+ * carries a p384_mldsa65 composite key; the combined ECDSA+ML-DSA signature
+ * travels in the STANDARD CertificateVerify.  Composite needs neither the
+ * hybrid_cert extension nor a PQCertificateVerify.
+ */
+static int test_composite_standard_cv(void)
+{
+    SSL_CTX *sctx = NULL, *cctx = NULL;
+    int ok = 0;
+
+    if (!have_oqs)
+        return TEST_skip("oqsprovider not available");
+    if (!build_composite_pair(&sctx, &cctx))
+        goto end;
+    if (!expect_standard_cv(sctx, cctx, "p384_mldsa65"))
+        goto end;
+    ok = 1;
+ end:
+    SSL_CTX_free(sctx);
+    SSL_CTX_free(cctx);
+    return ok;
+}
+
 int setup_tests(void)
 {
     if (!TEST_ptr(certsdir = test_get_argument(0)))
@@ -1148,6 +1371,8 @@ int setup_tests(void)
     ADD_TEST(test_related_happy_path);
     ADD_TEST(test_related_binding_enforced);
     ADD_ALL_TESTS(test_related_type_intersection, 2);
+    ADD_TEST(test_pure_pqc_standard_cv);
+    ADD_TEST(test_composite_standard_cv);
     return 1;
 }
 

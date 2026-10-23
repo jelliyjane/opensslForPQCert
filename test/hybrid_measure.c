@@ -53,18 +53,24 @@
  *   reconstruction and the RFC 9763 Related binding hash.  It is separate from
  *   the PoP (CertificateVerify / PQCertificateVerify) sign/verify columns.
  *
- * Composite format note (column semantics):
- *   The "composite" format presents a single leaf certificate whose key is an
- *   oqsprovider composite sigalg (e.g. p384_mldsa65).  Its combined classical+PQC
- *   signature is ONE inseparable operation, so it cannot be split across the
- *   classical_* and pq_* columns.  In this fork is_pqc_only_certificate()
- *   classifies the composite key, so the server emits a single
- *   PQCertificateVerify (no classical CertificateVerify) just like a pure PQC
- *   leaf; the whole composite sign/verify cost is therefore recorded in
- *   pq_sign_ms / pq_verify_ms and classical_sign_ms = classical_verify_ms = 0.
- *   composite is a single-certificate control: hybrid is NOT negotiated and no
- *   separate PQC certificate is sent, so verify_ok mirrors the pure baseline
- *   (a completed handshake with oqsprovider loaded is a valid sample).
+ * Pure / composite note (column semantics):
+ *   The "pure" format presents a single PQC leaf; the "composite" format a
+ *   single leaf whose key is an oqsprovider composite sigalg (e.g.
+ *   p384_mldsa65).  Both are standard TLS 1.3: the scheme is negotiated via
+ *   signature_algorithms and the server proves possession with ONE standard
+ *   CertificateVerify (HandshakeType 15); no PQCertificateVerify is sent and
+ *   hybrid is NOT negotiated.  A composite signature is ONE inseparable
+ *   classical+PQC operation, so it cannot be split across the classical_* and
+ *   pq_* columns.  The -DHYBRID_MEASURE timer around that CertificateVerify is
+ *   routed by key type (ssl/statem/statem_lib.c), so a PQC or composite key's
+ *   whole sign/verify cost lands in pq_sign_ms / pq_verify_ms and
+ *   classical_sign_ms = classical_verify_ms = 0 -- the same columns as in the
+ *   paper dataset, which was collected when these two formats still sent that
+ *   one proof as a PQCertificateVerify (HandshakeType 250): same bytes on the
+ *   wire, same single signature operation.  Both are single-certificate
+ *   controls: no separate PQC certificate is sent, so verify_ok mirrors the
+ *   traditional baseline (a completed handshake with oqsprovider loaded is a
+ *   valid sample).
  *
  * Build: compiled into the test tree.  For real crypto timings configure the
  * whole tree with -DHYBRID_MEASURE; without it handshake_ms and cert_bytes are

@@ -170,19 +170,26 @@ static int ossl_statem_client13_read_transition(SSL_CONNECTION *s, int mt)
 
     case TLS_ST_CR_CERT:
     case TLS_ST_CR_COMP_CERT:
+        /*
+         * Certificate is always followed by the standard CertificateVerify,
+         * whatever the leaf's key type (classical, pure-PQC or composite).
+         * A PQCertificateVerify is only ever valid AFTER that classical
+         * CertificateVerify (see TLS_ST_CR_CERT_VRFY below), so receiving one
+         * here is an unexpected message.
+         */
         if (mt == SSL3_MT_CERTIFICATE_VERIFY) {
             st->hand_state = TLS_ST_CR_CERT_VRFY;
-            return 1;
-        }
-        /* Also accept PQ_CERTIFICATE_VERIFY for PQC certificates */
-        if (mt == SSL3_MT_PQ_CERTIFICATE_VERIFY) {
-            st->hand_state = TLS_ST_CR_PQ_CERT_VRFY;
             return 1;
         }
         break;
 
     case TLS_ST_CR_CERT_VRFY:
-        /* Check if this is a PQC certificate (dual, PQC-only, or composite) - all use PQ_CERTIFICATE_VERIFY */
+        /*
+         * Negotiated hybrid_cert type (Chameleon, Catalyst, Related, Dual): the
+         * PQCertificateVerify follows the classical CertificateVerify.
+         * tls_process_pq_certificate_verify rejects it when no hybrid PQC key
+         * can be resolved from the peer's certificate material.
+         */
         if (mt == SSL3_MT_PQ_CERTIFICATE_VERIFY) {
             st->hand_state = TLS_ST_CR_PQ_CERT_VRFY;
             return 1;
@@ -1227,7 +1234,7 @@ WORK_STATE ossl_statem_client_post_process_message(SSL_CONNECTION *s,
         return tls_prepare_client_certificate(s, wst);
 
     case TLS_ST_CR_PQ_CERT_VRFY:
-        /* After processing PQ certificate verify (dual, PQC-only, or composite), prepare for next step */
+        /* After processing the hybrid PQ certificate verify, prepare for next step */
         return tls_prepare_client_certificate(s, wst);
 
     case TLS_ST_CR_CERT_REQ:
