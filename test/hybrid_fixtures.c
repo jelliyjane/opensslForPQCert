@@ -637,16 +637,17 @@ static int build_traditional(const char *tag, const char *cd,
 
 /*
  * Composite: a single leaf certificate whose key is an oqsprovider composite
- * sigalg (e.g. p384_mldsa65).  This is structurally the pure-PQC single-cert
- * path: the fork's is_pqc_only_certificate() classifies the composite key, so
- * the server sends exactly one PQCertificateVerify carrying the composite
- * (combined classical+PQC) signature and NO classical CertificateVerify, and
- * hybrid auth is not negotiated.  None of the dual-certificate APIs
- * (SSL_CTX_set_pq_certificate / pq_verify_store / enable_dual_certs) are used.
- * Consequently the combined sign/verify cost is recorded in the measurement
- * binary's pq_* CSV columns (classical_* = 0).  |label| selects the fixtures
- * server_<label>_{cert,key}.pem and CA ca_<label>.pem; the wiring is identical
- * to build_pure().
+ * sigalg (e.g. p384_mldsa65).  This is the pure-PQC single-cert path with a
+ * composite key: the composite scheme is negotiated via signature_algorithms
+ * and the server proves possession with exactly one standard CertificateVerify
+ * carrying the composite (combined classical+PQC) signature; no
+ * PQCertificateVerify is sent and hybrid auth is not negotiated.  None of the
+ * dual-certificate APIs (SSL_CTX_set_pq_certificate / pq_verify_store /
+ * enable_dual_certs) are used.  The measurement build routes that
+ * CertificateVerify's timer by key type, so the combined sign/verify cost is
+ * recorded in the pq_* CSV columns (classical_* = 0).  |label| selects the
+ * fixtures server_<label>_{cert,key}.pem and CA ca_<label>.pem; the wiring is
+ * identical to build_pure().
  */
 static int build_composite(const char *label, const char *cd,
                            SSL_CTX **sctx, SSL_CTX **cctx)

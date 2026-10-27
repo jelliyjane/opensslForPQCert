@@ -250,10 +250,17 @@ int tls_setup_handshake(SSL_CONNECTION *s)
 
 /*
  * Size of the to-be-signed TLS13 data, without the hash size itself:
- * 64 bytes of value 32, 33 context bytes, 1 byte separator
+ * 64 bytes of value 32, the context string, 1 byte separator.  The standard
+ * CertificateVerify context ("TLS 1.3, server CertificateVerify") is 33 bytes;
+ * the PQCertificateVerify context ("TLS 1.3, server PQ CertificateVerify") is
+ * 36 bytes.  TBS buffers are sized for the longer of the two.
  */
 #define TLS13_TBS_START_SIZE            64
-#define TLS13_TBS_PREAMBLE_SIZE         (TLS13_TBS_START_SIZE + 33 + 1)
+#define TLS13_TBS_CONTEXT_SIZE          33
+#define TLS13_TBS_PQ_CONTEXT_SIZE       36
+#define TLS13_TBS_PREAMBLE_SIZE(ctxlen) (TLS13_TBS_START_SIZE + (ctxlen) + 1)
+#define TLS13_TBS_MAX_PREAMBLE_SIZE     \
+    TLS13_TBS_PREAMBLE_SIZE(TLS13_TBS_PQ_CONTEXT_SIZE)
 
 static int get_cert_verify_tbs_data(SSL_CONNECTION *s, unsigned char *tls13tbs,
                                     void **hdata, size_t *hdatalen)
@@ -264,47 +271,89 @@ static int get_cert_verify_tbs_data(SSL_CONNECTION *s, unsigned char *tls13tbs,
     /* ASCII: "TLS 1.3, client CertificateVerify", in hex for EBCDIC compatibility */
     static const char clientcontext[] = "\x54\x4c\x53\x20\x31\x2e\x33\x2c\x20\x63\x6c\x69"
         "\x65\x6e\x74\x20\x43\x65\x72\x74\x69\x66\x69\x63\x61\x74\x65\x56\x65\x72\x69\x66\x79";
+    /*
+     * PQCertificateVerify uses its own context strings so that a PQC
+     * proof-of-possession can never be confused with (or replayed as) a
+     * classical CertificateVerify over the same transcript.
+     */
+    /* ASCII: "TLS 1.3, server PQ CertificateVerify", in hex for EBCDIC compatibility */
+    static const char pqservercontext[] = "\x54\x4c\x53\x20\x31\x2e\x33\x2c\x20\x73\x65\x72"
+        "\x76\x65\x72\x20\x50\x51\x20\x43\x65\x72\x74\x69\x66\x69\x63\x61\x74\x65\x56\x65"
+        "\x72\x69\x66\x79";
+    /* ASCII: "TLS 1.3, client PQ CertificateVerify", in hex for EBCDIC compatibility */
+    static const char pqclientcontext[] = "\x54\x4c\x53\x20\x31\x2e\x33\x2c\x20\x63\x6c\x69"
+        "\x65\x6e\x74\x20\x50\x51\x20\x43\x65\x72\x74\x69\x66\x69\x63\x61\x74\x65\x56\x65"
+        "\x72\x69\x66\x79";
 
     if (SSL_CONNECTION_IS_TLS13(s)) {
-        size_t hashlen;
+        size_t hashlen, ctxlen, preamble;
+        const char *context;
+        int reading;
 
+        /*
+         * Pick the context string from the message being built or checked:
+         * the standard CertificateVerify keeps the RFC 8446 contexts, the
+         * PQCertificateVerify (negotiated hybrid_cert types only) gets the PQ
+         * contexts.  Server-side messages are written in SW_* states and read
+         * by the client in CR_* states; client-authentication messages are
+         * written in CW_* states and read by the server in SR_* states.
+         */
+        switch (s->statem.hand_state) {
+        case TLS_ST_CR_CERT_VRFY:
+        case TLS_ST_SW_CERT_VRFY:
+            context = servercontext;
+            ctxlen = sizeof(servercontext) - 1;
+            break;
+        case TLS_ST_CR_PQ_CERT_VRFY:
+        case TLS_ST_SW_PQ_CERT_VRFY:
+            context = pqservercontext;
+            ctxlen = sizeof(pqservercontext) - 1;
+            break;
+        case TLS_ST_SR_PQ_CERT_VRFY:
+        case TLS_ST_CW_PQ_CERT_VRFY:
+            context = pqclientcontext;
+            ctxlen = sizeof(pqclientcontext) - 1;
+            break;
+        default:
+            /* TLS_ST_SR_CERT_VRFY / TLS_ST_CW_CERT_VRFY */
+            context = clientcontext;
+            ctxlen = sizeof(clientcontext) - 1;
+            break;
+        }
+        if (!ossl_assert(ctxlen <= TLS13_TBS_PQ_CONTEXT_SIZE)) {
+            SSLfatal(s, SSL_AD_INTERNAL_ERROR, ERR_R_INTERNAL_ERROR);
+            return 0;
+        }
+        preamble = TLS13_TBS_PREAMBLE_SIZE(ctxlen);
 
-        
         /* Set the first 64 bytes of to-be-signed data to octet 32 */
         memset(tls13tbs, 32, TLS13_TBS_START_SIZE);
-        /* This copies the 33 bytes of context plus the 0 separator byte */
-        if (s->statem.hand_state == TLS_ST_CR_CERT_VRFY
-                 || s->statem.hand_state == TLS_ST_SW_CERT_VRFY
-                 || s->statem.hand_state == TLS_ST_CR_PQ_CERT_VRFY
-                 || s->statem.hand_state == TLS_ST_SW_PQ_CERT_VRFY)
-            strcpy((char *)tls13tbs + TLS13_TBS_START_SIZE, servercontext);
-        else
-            strcpy((char *)tls13tbs + TLS13_TBS_START_SIZE, clientcontext);
+        /* This copies the context bytes plus the 0 separator byte */
+        memcpy(tls13tbs + TLS13_TBS_START_SIZE, context, ctxlen + 1);
 
         /*
          * If we're currently reading then we need to use the saved handshake
          * hash value. We can't use the current handshake hash state because
          * that includes the CertVerify itself.
          */
-        if (s->statem.hand_state == TLS_ST_CR_CERT_VRFY
-                || s->statem.hand_state == TLS_ST_SR_CERT_VRFY
-                || s->statem.hand_state == TLS_ST_CR_PQ_CERT_VRFY
-                || s->statem.hand_state == TLS_ST_SR_PQ_CERT_VRFY) {
-
-            memcpy(tls13tbs + TLS13_TBS_PREAMBLE_SIZE, s->cert_verify_hash,
+        reading = s->statem.hand_state == TLS_ST_CR_CERT_VRFY
+                  || s->statem.hand_state == TLS_ST_SR_CERT_VRFY
+                  || s->statem.hand_state == TLS_ST_CR_PQ_CERT_VRFY
+                  || s->statem.hand_state == TLS_ST_SR_PQ_CERT_VRFY;
+        if (reading) {
+            memcpy(tls13tbs + preamble, s->cert_verify_hash,
                    s->cert_verify_hash_len);
             hashlen = s->cert_verify_hash_len;
         } else {
-
-            if (!ssl_handshake_hash(s, tls13tbs + TLS13_TBS_PREAMBLE_SIZE,
-                                       EVP_MAX_MD_SIZE, &hashlen)) {
+            if (!ssl_handshake_hash(s, tls13tbs + preamble,
+                                    EVP_MAX_MD_SIZE, &hashlen)) {
                 /* SSLfatal() already called */
                 return 0;
             }
         }
 
         *hdata = tls13tbs;
-        *hdatalen = TLS13_TBS_PREAMBLE_SIZE + hashlen;
+        *hdatalen = preamble + hashlen;
 
     } else {
         size_t retlen;
@@ -321,6 +370,48 @@ static int get_cert_verify_tbs_data(SSL_CONNECTION *s, unsigned char *tls13tbs,
     return 1;
 }
 
+#ifdef HYBRID_MEASURE
+/*
+ * Measurement-column routing for the standard CertificateVerify.  A pure-PQC
+ * or composite leaf proves possession of its key with the standard
+ * CertificateVerify (the PQCertificateVerify is reserved for the negotiated
+ * hybrid_cert types), so the single sign/verify of such a key must be
+ * accounted in the pq_* columns.  This keeps the CSV semantics documented in
+ * test/hybrid_measure.c: pure/composite rows carry their whole cost in
+ * pq_sign_ms / pq_verify_ms and classical_sign_ms = classical_verify_ms = 0.
+ * Keys of libssl's built-in certificate types (RSA, RSA-PSS, DSA, ECDSA, GOST,
+ * Ed25519, Ed448) are classical; any other key belongs to a provider-registered
+ * signature algorithm, i.e. an oqs-provider PQC or composite key, and counts
+ * as PQ.
+ */
+static int hybrid_measure_key_is_classical(SSL_CONNECTION *s,
+                                           const EVP_PKEY *pkey)
+{
+    size_t idx = 0;
+
+    return pkey != NULL
+        && ssl_cert_lookup_by_pkey(pkey, &idx,
+                                   SSL_CONNECTION_GET_CTX(s)) != NULL
+        && idx < SSL_PKEY_NUM;
+}
+
+static uint64_t *hybrid_measure_sign_counter(SSL_CONNECTION *s,
+                                             const EVP_PKEY *pkey)
+{
+    return hybrid_measure_key_is_classical(s, pkey)
+        ? &s->hybrid_measure.classical_sign_ns
+        : &s->hybrid_measure.pq_sign_ns;
+}
+
+static uint64_t *hybrid_measure_verify_counter(SSL_CONNECTION *s,
+                                               const EVP_PKEY *pkey)
+{
+    return hybrid_measure_key_is_classical(s, pkey)
+        ? &s->hybrid_measure.classical_verify_ns
+        : &s->hybrid_measure.pq_verify_ns;
+}
+#endif /* HYBRID_MEASURE */
+
 CON_FUNC_RETURN tls_construct_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
 {
     EVP_PKEY *pkey = NULL;
@@ -330,7 +421,7 @@ CON_FUNC_RETURN tls_construct_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
     size_t hdatalen = 0, siglen = 0;
     void *hdata;
     unsigned char *sig = NULL;
-    unsigned char tls13tbs[TLS13_TBS_PREAMBLE_SIZE + EVP_MAX_MD_SIZE];
+    unsigned char tls13tbs[TLS13_TBS_MAX_PREAMBLE_SIZE + EVP_MAX_MD_SIZE];
     const SIGALG_LOOKUP *lu = s->s3.tmp.sigalg;
     SSL_CTX *sctx = SSL_CONNECTION_GET_CTX(s);
 
@@ -417,7 +508,8 @@ CON_FUNC_RETURN tls_construct_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
             goto err;
         }
 #ifdef HYBRID_MEASURE
-        HYBRID_MEASURE_ACCUM(s->hybrid_measure.classical_sign_ns, _hm0);
+        /* pure-PQC / composite keys sign here too: route by key type */
+        HYBRID_MEASURE_ACCUM(*hybrid_measure_sign_counter(s, pkey), _hm0);
 #endif
     }
 
@@ -473,7 +565,7 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
         goto end;
     }
 
-    /* Get PQC private key - support dual mode, Catalyst, and PQC-only/composite */
+    /* Resolve the hybrid PQC private key: Dual/Related, Catalyst or Chameleon */
     if (SSL_CONNECTION_HYBRID_NEGOTIATED(s) && s->cert->pqkey != NULL && s->cert->pqkey->privatekey != NULL) {
         /* Hybrid (dual) negotiated: use the dedicated PQ key */
         pq_pkey = s->cert->pqkey->privatekey;
@@ -508,10 +600,13 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
          * verifiable by the peer.
          */
         pq_pkey = s->cert->delta_privatekey;
-    } else if (s->cert->key != NULL && s->cert->key->privatekey != NULL) {
-        /* PQC-only or composite: use main key */
-        pq_pkey = s->cert->key->privatekey;
     } else {
+        /*
+         * Only reachable with hybrid negotiated (the state machine never
+         * schedules a PQCertificateVerify otherwise), so a missing PQC key is
+         * an internal inconsistency -- not a pure-PQC or composite leaf: those
+         * prove possession through the standard CertificateVerify instead.
+         */
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
     }
@@ -548,7 +643,7 @@ CON_FUNC_RETURN tls_construct_pq_cert_verify(SSL_CONNECTION *s, WPACKET *pkt)
     }
 
     /* Prepare data to sign */
-    unsigned char tls13tbs[TLS13_TBS_PREAMBLE_SIZE + EVP_MAX_MD_SIZE];
+    unsigned char tls13tbs[TLS13_TBS_MAX_PREAMBLE_SIZE + EVP_MAX_MD_SIZE];
     if (!get_cert_verify_tbs_data(s, tls13tbs, &hdata, &hdatalen)) {
         SSLfatal(s, SSL_AD_INTERNAL_ERROR, SSL_R_LIBRARY_BUG);
         goto end;
@@ -627,7 +722,7 @@ MSG_PROCESS_RETURN tls_process_cert_verify(SSL_CONNECTION *s, PACKET *pkt)
     const EVP_MD *md = NULL;
     size_t hdatalen = 0;
     void *hdata;
-    unsigned char tls13tbs[TLS13_TBS_PREAMBLE_SIZE + EVP_MAX_MD_SIZE];
+    unsigned char tls13tbs[TLS13_TBS_MAX_PREAMBLE_SIZE + EVP_MAX_MD_SIZE];
     EVP_MD_CTX *mctx = EVP_MD_CTX_new();
     EVP_PKEY_CTX *pctx = NULL;
     SSL_CTX *sctx = SSL_CONNECTION_GET_CTX(s);
@@ -759,7 +854,8 @@ MSG_PROCESS_RETURN tls_process_cert_verify(SSL_CONNECTION *s, PACKET *pkt)
 #endif
         j = EVP_DigestVerify(mctx, data, len, hdata, hdatalen);
 #ifdef HYBRID_MEASURE
-        HYBRID_MEASURE_ACCUM(s->hybrid_measure.classical_verify_ns, _hm0);
+        /* pure-PQC / composite keys are verified here too: route by key type */
+        HYBRID_MEASURE_ACCUM(*hybrid_measure_verify_counter(s, pkey), _hm0);
 #endif
 #ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
         /* Ignore bad signatures when fuzzing */
@@ -795,8 +891,10 @@ MSG_PROCESS_RETURN tls_process_cert_verify(SSL_CONNECTION *s, PACKET *pkt)
      * CV is already accumulated by the time it builds the PQCertificateVerify),
      * so it is unconditionally chained; this read-side re-snapshot is what
      * brings the verifier's TBS into parity for the single-certificate case.
-     * PQC-only/composite handshakes carry no classical CertificateVerify and
-     * therefore never reach this function, so they are excluded automatically.
+     * A pure-PQC or composite leaf passes through here as well (this standard
+     * CertificateVerify IS its proof-of-possession), but hybrid is never
+     * negotiated for it, so the condition below excludes it and no
+     * PQCertificateVerify follows.
      */
     if (SSL_CONNECTION_IS_TLS13(s) && s->session
             && (s->session->dual_certs_enabled
@@ -900,7 +998,7 @@ MSG_PROCESS_RETURN tls_process_pq_certificate_verify(SSL_CONNECTION *s, PACKET *
     const EVP_MD *pq_md = NULL;
     size_t hdatalen = 0;
     void *hdata;
-    unsigned char tls13tbs[TLS13_TBS_PREAMBLE_SIZE + EVP_MAX_MD_SIZE];
+    unsigned char tls13tbs[TLS13_TBS_MAX_PREAMBLE_SIZE + EVP_MAX_MD_SIZE];
     EVP_MD_CTX *pq_mctx = EVP_MD_CTX_new();
     EVP_PKEY_CTX *pq_pctx = NULL;
     SSL_CTX *sctx = SSL_CONNECTION_GET_CTX(s);
@@ -915,7 +1013,7 @@ MSG_PROCESS_RETURN tls_process_pq_certificate_verify(SSL_CONNECTION *s, PACKET *
         goto end;
     }
 
-    /* Get PQC public key - support both dual mode and PQC-only/composite */
+    /* Resolve the hybrid PQC public key: Dual/Related PQC chain first */
     if (s->session != NULL && s->session->dual_certs_enabled && 
         s->session->peer_pqc_chain != NULL && 
         sk_X509_num(s->session->peer_pqc_chain) > 0) {
@@ -927,17 +1025,21 @@ MSG_PROCESS_RETURN tls_process_pq_certificate_verify(SSL_CONNECTION *s, PACKET *
     }
     
     /*
-     * Single-certificate hybrids and the pure-PQC/composite case all carry the
-     * PQC public key in the (single) peer certificate, but in different places:
+     * Single-certificate hybrids carry the PQC public key inside the (single)
+     * peer certificate, in different places:
      *   - Catalyst:  subjectAltPublicKeyInfo extension (alternative key);
-     *   - Chameleon: the reconstructed Delta certificate's SubjectPublicKeyInfo;
-     *   - PQC-only / composite: the peer's main key itself.
+     *   - Chameleon: the reconstructed Delta certificate's SubjectPublicKeyInfo.
      * The certificate-level trust of these keys is established separately
      * (Catalyst: X509v3_alt_sig_validate_path during chain verification;
      *  Chameleon: ssl_verify_chameleon_dcd full path validation of the
      *  reconstructed Delta, run from the certificate post-processing on both
      *  peer-authentication directions); here we only resolve the key used to
      *  verify the PQCertificateVerify PoP.
+     * A pure-PQC or composite leaf never gets here: its proof-of-possession is
+     * the standard CertificateVerify, and the state machine accepts a
+     * PQCertificateVerify only after that message.  A peer certificate that
+     * carries neither extension (and no PQC chain) therefore leaves pq_pkey
+     * NULL and the message is rejected as unexpected.
      * pq_pkey must own a reference because it is released with EVP_PKEY_free()
      * at the end of this function.
      */
@@ -970,9 +1072,6 @@ MSG_PROCESS_RETURN tls_process_pq_certificate_verify(SSL_CONNECTION *s, PACKET *
                 }
                 DeltaCertificateDescriptor_free(dcd);
             }
-        } else if (is_pqc_only_certificate(s)) {
-            /* Pure PQC or composite: the peer's main key is the PQC key. */
-            pq_pkey = X509_get_pubkey(peer);
         }
     }
     

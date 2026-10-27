@@ -16,19 +16,23 @@
  * (ML-DSA 44/65/87, Falcon 512/1024, SLH-DSA-SHA2 128/192/256 s+f) to confirm
  * the integration is signature-algorithm agnostic before AWS measurement.
  *
- * Composite is also exercised, as a single-certificate control: its leaf carries
- * an oqsprovider composite sigalg key, which is_pqc_only_certificate() classifies
- * so the server sends ONE PQCertificateVerify and no classical CertificateVerify,
- * and hybrid is NOT negotiated.  Composite fixtures are regenerated on the
- * measurement host (not committed), so the composite cases skip gracefully when
- * their PEMs are absent (see fixtures_present()).
+ * The two single-certificate controls are exercised as well.  Pure (a PQC leaf
+ * as the only certificate) and Composite (a leaf whose key is an oqsprovider
+ * composite sigalg, e.g. p384_mldsa65) are standard TLS 1.3: the signature
+ * scheme is negotiated through signature_algorithms, the server proves
+ * possession with exactly ONE standard CertificateVerify, no
+ * PQCertificateVerify is sent, and hybrid is NOT negotiated.  Composite
+ * fixtures are regenerated on the measurement host (not committed), so the
+ * composite cases skip gracefully when their PEMs are absent (see
+ * fixtures_present()).
  *
  * Each hybrid case drives a real TLS 1.3 handshake over shared-memory BIOs and
  * asserts that hybrid auth was negotiated, that exactly one classical
  * CertificateVerify and one PQCertificateVerify were observed (the PoP was
  * actually sent AND the client verified it through the normal path -- there is
- * no verify callback override), and that the handshake completed.  The composite
- * case asserts the single-PQCertificateVerify / hybrid-not-negotiated outcome.
+ * no verify callback override), and that the handshake completed.  The pure
+ * and composite cases assert the one-CertificateVerify / no-PQCertificateVerify
+ * / hybrid-not-negotiated outcome.
  *
  * The per-format SSL_CTX wiring lives in the shared hybrid_fixtures module
  * (also used by the real-socket measurement binary); this file only drives the
@@ -246,15 +250,52 @@ static int fixtures_present(const char *label)
 }
 
 /*
- * Composite control: a single leaf carrying a composite sigalg key.  Unlike the
- * four hybrid formats, hybrid is NOT negotiated and the server sends exactly one
- * PQCertificateVerify with no classical CertificateVerify.
+ * Assert the single-certificate control outcome shared by the pure-PQC and
+ * composite formats: handshake completed, hybrid NOT negotiated, exactly one
+ * standard CertificateVerify (which carries the PQC or composite signature)
+ * and NO PQCertificateVerify.  That message is reserved for the negotiated
+ * hybrid_cert types; a pure or composite leaf is stock TLS 1.3 with its scheme
+ * negotiated through signature_algorithms.
  */
+static int expect_standard_ok(SSL_CTX *sctx, SSL_CTX *cctx)
+{
+    handshake_obs obs;
+    int negotiated = 0;
+
+    if (!TEST_true(connect_observed(sctx, cctx, &obs, &negotiated, NULL)))
+        return 0;
+    return TEST_int_eq(negotiated, 0)
+        && TEST_int_eq(obs.classical_cv, 1)
+        && TEST_int_eq(obs.pq_cert_verify, 0);
+}
+
+/* Pure PQC control: a single PQC leaf, standard signature_algorithms path. */
+static int test_pure(int idx)
+{
+    SSL_CTX *sctx = NULL, *cctx = NULL;
+    int ok = 0;
+
+    if (!have_oqs)
+        return TEST_skip("oqsprovider not available");
+
+    TEST_info("pure x %s", ALGS[idx]);
+
+    if (!TEST_true(hf_build_pair(HF_PURE, ALGS[idx], certsdir, &sctx, &cctx)))
+        goto end;
+    if (!expect_standard_ok(sctx, cctx))
+        goto end;
+    ok = 1;
+ end:
+    SSL_CTX_free(sctx);
+    SSL_CTX_free(cctx);
+    return ok;
+}
+
+/* Composite control: a single leaf carrying a composite sigalg key. */
 static int test_composite(int idx)
 {
     SSL_CTX *sctx = NULL, *cctx = NULL;
-    handshake_obs obs;
-    int negotiated = 0, ok = 0;
+    int ok = 0;
 
     if (!have_oqs)
         return TEST_skip("oqsprovider not available");
@@ -266,11 +307,7 @@ static int test_composite(int idx)
     if (!TEST_true(hf_build_pair(HF_COMPOSITE, COMPOSITE_ALGS[idx], certsdir,
                                  &sctx, &cctx)))
         goto end;
-    if (!TEST_true(connect_observed(sctx, cctx, &obs, &negotiated, NULL)))
-        goto end;
-    if (!TEST_int_eq(negotiated, 0)
-            || !TEST_int_eq(obs.classical_cv, 0)
-            || !TEST_int_eq(obs.pq_cert_verify, 1))
+    if (!expect_standard_ok(sctx, cctx))
         goto end;
     ok = 1;
  end:
@@ -296,6 +333,7 @@ int setup_tests(void)
     ADD_ALL_TESTS(test_catalyst, NALG);
     ADD_ALL_TESTS(test_chameleon, NALG);
     ADD_ALL_TESTS(test_related, NALG);
+    ADD_ALL_TESTS(test_pure, NALG);
     ADD_ALL_TESTS(test_composite, NCOMP);
     return 1;
 }

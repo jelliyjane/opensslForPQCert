@@ -1935,8 +1935,24 @@ int tls12_check_peer_sigalg(SSL_CONNECTION *s, uint16_t sig, EVP_PKEY *pkey)
     int pkeyid = -1;
     const SIGALG_LOOKUP *lu;
     int secbits = 0;
+    int pq_tables, fork_pq = 0;
 
     pkeyid = EVP_PKEY_get_id(pkey);
+
+    /*
+     * The fork's private PQ/composite signature-scheme tables, and the relaxed
+     * checks that go with them, are the PQCertificateVerify's own code-point
+     * space: they apply only while a PQCertificateVerify is being processed.
+     * The standard CertificateVerify -- including the one that carries a
+     * pure-PQC or composite proof-of-possession -- keeps stock OpenSSL
+     * semantics, under which provider-registered (TLS-SIGALG) schemes such as
+     * oqs-provider's are resolved through the ordinary sigalg cache.  This
+     * also keeps a provider code point that happens to fall inside one of the
+     * fork's private ranges (e.g. oqs-provider's mldsa87 at 0x0906) from being
+     * re-interpreted through the fork tables on the standard path.
+     */
+    pq_tables = s->statem.hand_state == TLS_ST_CR_PQ_CERT_VRFY
+                || s->statem.hand_state == TLS_ST_SR_PQ_CERT_VRFY;
 
     if (SSL_CONNECTION_IS_TLS13(s)) {
         /* Disallow DSA for TLS 1.3 */
@@ -1950,8 +1966,8 @@ int tls12_check_peer_sigalg(SSL_CONNECTION *s, uint16_t sig, EVP_PKEY *pkey)
     }
     lu = tls1_lookup_sigalg(s, sig);
     
-    /* Enhanced PQ signature algorithm detection */
-    if (lu == NULL || (sig >= 0x0401 && sig <= 0x040A) || (sig >= TLSEXT_SIGALG_falcon512 && sig <= TLSEXT_SIGALG_mldsa_87) || (sig >= TLSEXT_SIGALG_slhdsa_sha2_128s && sig <= TLSEXT_SIGALG_slhdsa_sha2_256f) || sig == 0x0403) {
+    /* Enhanced PQ signature algorithm detection (PQCertificateVerify only) */
+    if (pq_tables && (lu == NULL || (sig >= 0x0401 && sig <= 0x040A) || (sig >= TLSEXT_SIGALG_falcon512 && sig <= TLSEXT_SIGALG_mldsa_87) || (sig >= TLSEXT_SIGALG_slhdsa_sha2_128s && sig <= TLSEXT_SIGALG_slhdsa_sha2_256f) || sig == 0x0403)) {
         const SIGALG_LOOKUP *pq_lu = tls1_lookup_pq_sigalg(s, sig);
         if (pq_lu != NULL) {
             lu = pq_lu;
@@ -2016,7 +2032,7 @@ int tls12_check_peer_sigalg(SSL_CONNECTION *s, uint16_t sig, EVP_PKEY *pkey)
     }
     
     /* Enhanced composite signature algorithm detection - same logic as PQ */
-    if (lu == NULL || (sig >= 0x090C && sig <= 0x09FF)) {
+    if (pq_tables && (lu == NULL || (sig >= 0x090C && sig <= 0x09FF))) {
         const SIGALG_LOOKUP *composite_lu = tls1_lookup_composite_sigalg(s, sig);
         if (composite_lu != NULL) {
             lu = composite_lu;
@@ -2029,6 +2045,19 @@ int tls12_check_peer_sigalg(SSL_CONNECTION *s, uint16_t sig, EVP_PKEY *pkey)
         }
     }
     
+    /*
+     * Is |lu| one of the fork's private PQ/composite code points (only possible
+     * on the PQCertificateVerify path)?  Those entries are not backed by the
+     * certificate lookup table, so the checks below are relaxed for them.
+     */
+    fork_pq = pq_tables && lu != NULL
+              && ((lu->sigalg >= 0x0401 && lu->sigalg <= 0x040A)
+                  || (lu->sigalg >= TLSEXT_SIGALG_falcon512
+                      && lu->sigalg <= TLSEXT_SIGALG_mldsa_87)
+                  || (lu->sigalg >= TLSEXT_SIGALG_slhdsa_sha2_128s
+                      && lu->sigalg <= TLSEXT_SIGALG_slhdsa_sha2_256f)
+                  || (lu->sigalg >= 0x090C && lu->sigalg <= 0x09FF));
+
     /* if this sigalg is loaded, set so far unknown pkeyid to its sig NID */
     if ((pkeyid == EVP_PKEY_KEYMGMT) && (lu != NULL))
         pkeyid = lu->sig;
@@ -2047,19 +2076,17 @@ int tls12_check_peer_sigalg(SSL_CONNECTION *s, uint16_t sig, EVP_PKEY *pkey)
             && (lu->hash == NID_sha1 || lu->hash == NID_sha224))
         || (pkeyid != lu->sig
         && (lu->sig != EVP_PKEY_RSA_PSS || pkeyid != EVP_PKEY_RSA)
-        && !(lu->sigalg >= 0x0401 && lu->sigalg <= 0x040A)  /* Allow PQ algorithms 0x04xx */
-                    && !(lu->sigalg >= TLSEXT_SIGALG_falcon512 && lu->sigalg <= TLSEXT_SIGALG_mldsa_87)  /* Allow PQ algorithms 0x09xx */
-                    && !(lu->sigalg >= TLSEXT_SIGALG_slhdsa_sha2_128s && lu->sigalg <= TLSEXT_SIGALG_slhdsa_sha2_256f)  /* Allow SLH-DSA 0x0A0x */
-                    && !(lu->sigalg >= 0x090C && lu->sigalg <= 0x09FF))) { /* Allow composite algorithms 0x090C-0x09FF */
+        && !fork_pq)) { /* fork PQ/composite tables: key type checked by name */
         SSLfatal(s, SSL_AD_ILLEGAL_PARAMETER, SSL_R_WRONG_SIGNATURE_TYPE);
         return 0;
     }
-    /* Check the sigalg is consistent with the key OID */
-    /* Skip this check for PQ and composite algorithms as they may not be in the standard cert lookup table */
-    if (!(lu->sigalg >= 0x0401 && lu->sigalg <= 0x040A) && 
-                    !(lu->sigalg >= TLSEXT_SIGALG_falcon512 && lu->sigalg <= TLSEXT_SIGALG_mldsa_87) &&
-                    !(lu->sigalg >= TLSEXT_SIGALG_slhdsa_sha2_128s && lu->sigalg <= TLSEXT_SIGALG_slhdsa_sha2_256f) &&
-                    !(lu->sigalg >= 0x090C && lu->sigalg <= 0x09FF)) {
+    /*
+     * Check the sigalg is consistent with the key OID.  Skipped for the fork's
+     * PQ/composite tables (PQCertificateVerify only), whose entries are not in
+     * the certificate lookup table; provider-registered schemes are, so the
+     * standard CertificateVerify always runs this check.
+     */
+    if (!fork_pq) {
         if (!ssl_cert_lookup_by_nid(
                      (pkeyid == EVP_PKEY_RSA_PSS) ? EVP_PKEY_get_id(pkey) : pkeyid,
                      &cidx, SSL_CONNECTION_GET_CTX(s))
@@ -2067,7 +2094,6 @@ int tls12_check_peer_sigalg(SSL_CONNECTION *s, uint16_t sig, EVP_PKEY *pkey)
             SSLfatal(s, SSL_AD_ILLEGAL_PARAMETER, SSL_R_WRONG_SIGNATURE_TYPE);
             return 0;
         }
-    } else {
     }
 
     if (pkeyid == EVP_PKEY_EC) {
@@ -2138,8 +2164,8 @@ int tls12_check_peer_sigalg(SSL_CONNECTION *s, uint16_t sig, EVP_PKEY *pkey)
             break;
     }
     
-    /* Enhanced check for PQ algorithms */
-    if (i == sent_sigslen) {
+    /* Enhanced check for PQ algorithms (PQCertificateVerify only) */
+    if (pq_tables && i == sent_sigslen) {
         /* Try PQ signature algorithms if not found in classic algorithms */
         const uint16_t *pq_sigs;
         size_t pq_sigslen = tls12_get_pq_sigalgs(s, 1, &pq_sigs);
@@ -2151,7 +2177,7 @@ int tls12_check_peer_sigalg(SSL_CONNECTION *s, uint16_t sig, EVP_PKEY *pkey)
     }
     
     /* Enhanced check for composite algorithms - same logic as PQ */
-    if (i == sent_sigslen && (sig >= 0x090C && sig <= 0x09FF)) {
+    if (pq_tables && i == sent_sigslen && (sig >= 0x090C && sig <= 0x09FF)) {
         /* Try composite signature algorithms if not found in classic or PQ algorithms */
         /* Check if composite algorithm is in configured list */
         if (s->cert->dual_conf_sigalgs != NULL) {
@@ -2168,13 +2194,10 @@ int tls12_check_peer_sigalg(SSL_CONNECTION *s, uint16_t sig, EVP_PKEY *pkey)
         }
     }
     
-    /* Allow fallback to SHA1 if not strict mode (but not for PQ or composite algorithms) */
+    /* Allow fallback to SHA1 if not strict mode (fork PQ/composite tables exempt) */
     if (i == sent_sigslen && (lu->hash != NID_sha1
         || s->cert->cert_flags & SSL_CERT_FLAGS_CHECK_TLS_STRICT)
-        && !(lu->sigalg >= 0x0401 && lu->sigalg <= 0x040A)  /* Don't allow fallback for PQ 0x04xx */
-                    && !(lu->sigalg >= TLSEXT_SIGALG_falcon512 && lu->sigalg <= TLSEXT_SIGALG_mldsa_87)  /* Don't allow fallback for PQ 0x09xx */
-                    && !(lu->sigalg >= TLSEXT_SIGALG_slhdsa_sha2_128s && lu->sigalg <= TLSEXT_SIGALG_slhdsa_sha2_256f)  /* Don't allow fallback for SLH-DSA 0x0A0x */
-                    && !(lu->sigalg >= 0x090C && lu->sigalg <= 0x09FF)) { /* Don't allow fallback for composite 0x090C-0x09FF */
+        && !fork_pq) {
         SSLfatal(s, SSL_AD_HANDSHAKE_FAILURE, SSL_R_WRONG_SIGNATURE_TYPE);
         return 0;
     }
@@ -2190,21 +2213,27 @@ int tls12_check_peer_sigalg(SSL_CONNECTION *s, uint16_t sig, EVP_PKEY *pkey)
     sigalgstr[0] = (sig >> 8) & 0xff;
     sigalgstr[1] = sig & 0xff;
     
-    /* Enhanced security check for PQ and composite algorithms */
-    if (lu->sigalg >= 0x0401 && lu->sigalg <= 0x040A) {
+    /*
+     * Enhanced security check for the fork's PQ and composite tables
+     * (PQCertificateVerify only).  Everything else -- classical schemes and
+     * provider-registered PQC/composite schemes alike -- uses the stock
+     * computation, which takes a provider scheme's strength from its
+     * TLS-SIGALG registration.
+     */
+    if (fork_pq && (lu->sigalg >= 0x0401 && lu->sigalg <= 0x040A)) {
         /* For PQ algorithms (0x04xx), use tls1_get_pq_security_bits */
         secbits = tls1_get_pq_security_bits(lu->sigalg);
-    } else if (lu->sigalg >= TLSEXT_SIGALG_falcon512 && lu->sigalg <= TLSEXT_SIGALG_mldsa_65) {
+    } else if (fork_pq && (lu->sigalg >= TLSEXT_SIGALG_falcon512 && lu->sigalg <= TLSEXT_SIGALG_mldsa_65)) {
         /* For PQ algorithms (0x09xx), use tls1_get_pq_security_bits */
         secbits = tls1_get_pq_security_bits(lu->sigalg);
-    } else if (lu->sigalg >= TLSEXT_SIGALG_slhdsa_sha2_128s && lu->sigalg <= TLSEXT_SIGALG_slhdsa_sha2_256f) {
+    } else if (fork_pq && (lu->sigalg >= TLSEXT_SIGALG_slhdsa_sha2_128s && lu->sigalg <= TLSEXT_SIGALG_slhdsa_sha2_256f)) {
         /* For SLH-DSA algorithms (0x0A0x), use tls1_get_pq_security_bits */
         secbits = tls1_get_pq_security_bits(lu->sigalg);
-    } else if (lu->sigalg >= 0x090C && lu->sigalg <= 0x09FF) {
+    } else if (fork_pq && (lu->sigalg >= 0x090C && lu->sigalg <= 0x09FF)) {
         /* For composite algorithms (0x090C-0x09FF), use tls1_get_pq_security_bits */
         secbits = tls1_get_pq_security_bits(lu->sigalg);
     } else {
-        /* For classical algorithms, use sigalg_security_bits */
+        /* For classical and provider-registered algorithms, use sigalg_security_bits */
         secbits = sigalg_security_bits(SSL_CONNECTION_GET_CTX(s), lu);
     }
     
@@ -5015,134 +5044,6 @@ static int get_pqc_key_type_by_properties(const EVP_PKEY *pq_pkey)
     return KEY_TYPE_UNKNOWN;
 }
         
-/* Check if certificate is PQC or composite (PQC algorithms) */
-int is_pqc_only_certificate(SSL_CONNECTION *s)
-{
-    if (s == NULL || s->cert == NULL)
-        return 0;
-    
-    /* Check peer (server) certificate first - this is what we need for client-side detection */
-    if (s->session != NULL && s->session->peer != NULL) {
-        EVP_PKEY *peer_pkey = X509_get0_pubkey(s->session->peer);
-        if (peer_pkey != NULL) {
-            const char *key_type_name = EVP_PKEY_get0_type_name(peer_pkey);
-            if (key_type_name != NULL) {
-                /* Check composite algorithms first, before pure PQC */
-                if (strstr(key_type_name, "p256_mldsa44") != NULL ||
-                    strstr(key_type_name, "rsa3072_mldsa44") != NULL ||
-                    strstr(key_type_name, "p384_mldsa65") != NULL ||
-                    strstr(key_type_name, "mldsa65_pss3072") != NULL ||
-                    strstr(key_type_name, "mldsa65_rsa3072") != NULL ||
-                    strstr(key_type_name, "mldsa65_p256") != NULL ||
-                    strstr(key_type_name, "p521_mldsa87") != NULL ||
-                    strstr(key_type_name, "mldsa87_p384") != NULL ||
-                    strstr(key_type_name, "p256_falcon512") != NULL ||
-                    strstr(key_type_name, "rsa3072_falcon512") != NULL ||
-                    strstr(key_type_name, "p256_falconpadded512") != NULL ||
-                    strstr(key_type_name, "rsa3072_falconpadded512") != NULL ||
-                    strstr(key_type_name, "p521_falcon1024") != NULL ||
-                    strstr(key_type_name, "p521_falconpadded1024") != NULL ||
-                    strstr(key_type_name, "p256_sphincssha2128fsimple") != NULL ||
-                    strstr(key_type_name, "rsa3072_sphincssha2128fsimple") != NULL ||
-                    strstr(key_type_name, "p256_sphincssha2128ssimple") != NULL ||
-                    strstr(key_type_name, "rsa3072_sphincssha2128ssimple") != NULL ||
-                    strstr(key_type_name, "p384_sphincssha2192fsimple") != NULL ||
-                    strstr(key_type_name, "p384_sphincssha2192ssimple") != NULL ||
-                    strstr(key_type_name, "p521_sphincssha2256ssimple") != NULL ||
-                    strstr(key_type_name, "p521_sphincssha2256fsimple") != NULL ||
-                    strstr(key_type_name, "p256_sphincsshake128fsimple") != NULL ||
-                    strstr(key_type_name, "rsa3072_sphincsshake128fsimple") != NULL) {
-                    return 1;
-                }
-                /* Detect pure PQC algorithms by exact name patterns (only if not composite) */
-                if ((strstr(key_type_name, "mldsa44") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "mldsa65") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "mldsa87") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "falcon512") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "falcon1024") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "falconpadded512") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "falconpadded1024") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "sphincssha2128fsimple") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "sphincssha2128ssimple") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "sphincsshake128fsimple") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "sphincssha2192fsimple") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "sphincssha2192ssimple") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "sphincssha2256fsimple") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "sphincssha2256ssimple") != NULL && strchr(key_type_name, '_') == NULL)) {
-                    return 1;
-                }
-            }
-        }
-    }
-    
-    /* Check server certificates */
-    if (s->cert->key != NULL) {
-        EVP_PKEY *pkey = s->cert->key->privatekey;
-        if (pkey != NULL) {
-            const char *key_type_name = EVP_PKEY_get0_type_name(pkey);
-            if (key_type_name != NULL) {
-                /* Check composite algorithms first, before pure PQC */
-                if (strstr(key_type_name, "p256_mldsa44") != NULL ||
-                    strstr(key_type_name, "rsa3072_mldsa44") != NULL ||
-                    strstr(key_type_name, "p384_mldsa65") != NULL ||
-                    strstr(key_type_name, "mldsa65_pss3072") != NULL ||
-                    strstr(key_type_name, "mldsa65_rsa3072") != NULL ||
-                    strstr(key_type_name, "mldsa65_p256") != NULL ||
-                    strstr(key_type_name, "p521_mldsa87") != NULL ||
-                    strstr(key_type_name, "mldsa87_p384") != NULL ||
-                    strstr(key_type_name, "p256_falcon512") != NULL ||
-                    strstr(key_type_name, "rsa3072_falcon512") != NULL ||
-                    strstr(key_type_name, "p256_falconpadded512") != NULL ||
-                    strstr(key_type_name, "rsa3072_falconpadded512") != NULL ||
-                    strstr(key_type_name, "p521_falcon1024") != NULL ||
-                    strstr(key_type_name, "p521_falconpadded1024") != NULL ||
-                    strstr(key_type_name, "p256_sphincssha2128fsimple") != NULL ||
-                    strstr(key_type_name, "rsa3072_sphincssha2128fsimple") != NULL ||
-                    strstr(key_type_name, "p256_sphincssha2128ssimple") != NULL ||
-                    strstr(key_type_name, "rsa3072_sphincssha2128ssimple") != NULL ||
-                    strstr(key_type_name, "p384_sphincssha2192fsimple") != NULL ||
-                    strstr(key_type_name, "p384_sphincssha2192ssimple") != NULL ||
-                    strstr(key_type_name, "p521_sphincssha2256ssimple") != NULL ||
-                    strstr(key_type_name, "p521_sphincssha2256fsimple") != NULL ||
-                    strstr(key_type_name, "p256_sphincsshake128fsimple") != NULL ||
-                    strstr(key_type_name, "rsa3072_sphincsshake128fsimple") != NULL) {
-                    return 1;
-                }
-                /* Detect pure PQC algorithms by exact name patterns (only if not composite) */
-                /* Check for pure PQC: must NOT contain underscore (composite have underscore) */
-                if ((strstr(key_type_name, "mldsa44") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "mldsa65") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "mldsa87") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "falcon512") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "falcon1024") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "falconpadded512") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "falconpadded1024") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "sphincssha2128fsimple") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "sphincssha2128ssimple") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "sphincsshake128fsimple") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "sphincssha2192fsimple") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "sphincssha2192ssimple") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "sphincssha2256fsimple") != NULL && strchr(key_type_name, '_') == NULL) ||
-                    (strstr(key_type_name, "sphincssha2256ssimple") != NULL && strchr(key_type_name, '_') == NULL)) {
-                    return 1;
-                }
-            }
-        }
-    }
-    
-    /*
-     * A separate dual PQ key (s->cert->pqkey) does NOT make the certificate
-     * PQC-only: that is the dual (hybrid) configuration, whose main certificate
-     * is classical and which therefore still sends a classical CertificateVerify
-     * before the PQCertificateVerify. A genuinely PQC-only certificate has its
-     * MAIN key set to the PQC key and is detected by the peer/main-key checks
-     * above. Treating the dual pqkey as PQC-only made a dual server skip the
-     * classical CertificateVerify and emit a PQCertificateVerify even when
-     * hybrid auth was not negotiated, breaking non-hybrid clients.
-     */
-    return 0;
-}
-
 /* Separate classical and PQ certificate chains for dual certificate mode */
 int tls1_separate_dual_cert_chains(SSL_CONNECTION *s, 
                                    STACK_OF(X509) *all_certs,
